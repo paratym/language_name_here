@@ -1,0 +1,262 @@
+# primitive types
+# iptr, uptr
+# i8, i16, i24, i32, i64
+# u8, u16, u24, u32, u64
+# f32, f64
+# bool
+# char
+
+# variables
+let b: i32 = 0;
+let a = 0; # type can be inferred
+let mut c = 0; # opt into mutability
+
+let d: &i32 = c.& # reference to c
+let mut e: &mut i32 = c.&mut # mutable reference to c
+let f: i32 = e.* # deref e
+
+let const d: i32 = 0; # known at compile time
+
+# type aliases
+type YesNo = bool;
+let no: bool = false;
+# let nope: YesNo = no; # error expected value of type 'YesNo' but found 'bool'
+let nope: YesNo = YesNo(no); # explicitly cast type
+# the one exception is that T, (T), and <T>  can all be implicitly converted to and from one another
+# this makes constructors and destructuring work without needing either extra or implied brackets
+
+# arrays
+let p: i32[1] = [0]; # size must be known at compile time
+let pp = [0, 0]; # type can be inferred
+let ppp: i32[3] = [...0]; # create array filled with default values
+let pppppp: i32[6] = [1, ...0, 1]; # a single ...default parameter can be passed to an array literal
+let ppppppp = [1, ...ppp, 1, ...pp]; # arrays can be combined with the ... operator in any position
+let zero = ppp.[0]; # elements can be accessed with the '.[index]' syntax
+
+# slices
+let mut source: i32[6] = [...0];
+let slice = source.&[2...4]; # can take a reference to a slice of source using the ... operator
+let slic = source.&mut[3...]; # slice can be made mutable. either index can be removed to imply from the beginning and/or to the end
+let sli: i32[4] = source.[2...]; # ownership can also be taken
+
+# structs
+type Coordinates = (pub lat: f64, pub lng: f64); # fields can be made publicly accessible
+let position = Coordinates(lat = 0, lng = 0);
+let lat = position.lat; # public fields can be accessed using the . operator
+let pppos = Coordinates(lat, lng = 0); # the assignment can be omitted if the variable name matches the field name
+
+type SecretCoords = (lat: f64, lng: f64);
+# type can only be constructed within a method since it has private fields without defaults
+# let hidden_base = SecretCoords(lat = f64, lng = f64); # error fields 'lat' and 'lng' are private
+
+let inline_coords = (lat = f64(0), lng = f64(0)); # structs can be constructed without a named type
+# let pos_2: Coordinates = inline_coords; # error expected type 'Coordinates' but found '(lat: f64, lng: f64)'
+let pos_2: Coordinates = Coordinates(inline_coords); # can be explicitly cast when field names/types are identical
+let pos_3 = SecretCoords(pos_2) # fields in anonymous structs are all public, casting ignores field visibility
+let pos_4: (lng: f64, lat: f64) = infer(pos_3); # can cast from named type to known anonymous types using the infer keyword
+
+type OtherCoords = (pub f64, pub f64); # structs can be declared without field names
+let other = OtherCoords(0, 0);
+let other_lat = other.0; # fields can be accessed with an index
+
+type AThirdCoords = (lat: f64 = 0, lng: f64 = 0); # fields can be given default values
+let coords = AThirdCoords(); # allows for constructing structs with private fields
+# let lat = coords.lat; # error lat is a private field
+
+type Thingy (bool = false, i32); # default values can be in any location in positional structs
+let thingy_value = Thingy(-, 0); # '-' is an alias for the default value
+
+type AnathaOne = (elevation: f64 = 0, ...AThirdCoords); # structs can be combined with the ... operator after all named fields
+# type AnathaOne = (lat: f32, ...AThirdCoords); # error field 'lat' declared more than once
+
+let ccc = AnathaOne(lat: 0, lng: 0, elevation: 0);
+let cccc = AnathaOne(elevation: 1, ...ccc); # compound values can be combined with the ... operator after all fields
+# let ccccc = AnathaOne(elevation: 0, ...coords); # error only values of the exact same type can be combined with the ... operator
+
+type IStoppedCounting = (i32, ...Thingy, i32); # ... can be in any position when using positional fields
+let ddd = IStoppedCounting(0, -, 0, 0); # default values are retained while combining structs
+let dddd = IStoppedCounting(-, true, ...ddd); # ... still must be the last arg when combining instances of positional structs
+# when combining structs with the ... operator '-' is an alias for that field in the other value, not the default
+
+type INeedANewExample = (
+	pub lat: f64, # fields can be made publicly accessible
+	pub(get) lng: f64, # fields can be made externally read only and internally mutable
+	pub(set) idk: u32, # this should probably work for consistency, but i cant think of a use case
+);
+
+# unions
+type NotSure = (a: bool, b: bool); # just a normal struct
+type MakeADecision = union NotSure; # unions can be declared using the 'union' keyword
+# unions are just structs where only one field can be populated at a time
+
+let decision = MakeADecision(a = true); # unions can be constructed like this
+let other_one = MakeADecision.b(false); # or like this
+
+type SuperBool = union ( # unions can be declared inline
+	maybe: NotSure # variants can be given an associated type
+	maybeInline: (bool, bool), # structs can be declared inline
+	yes: (), # type cannot be omitted
+	no: (),
+);
+
+let who_knows = SuperBool.maybe(true, false); # type can be inferred without repeated parentheses
+let i_do = SuperBool.maybeInline(true, true);
+let me_too = SuperBool.yes();
+
+# control flow
+if 2 < 3 {}
+if let i = 2; i < 3 {} # same as the above
+# i is not accessible outside of the block
+
+if false {
+} else if false { # if blocks can be chained using the else keyword
+} else {}
+
+if let a = false; a {
+	# a would be usable if this was reachable
+} else if let b = false; b {
+	# a would not be accessible here, but b would
+}
+
+while false {} # the only loop keyword
+while let mut i = 0; i < 5 { i += 1 }
+
+if let SuperBool.maybe(a, b) = who_knows {} # 'if let Variant = value' can be used to create a branch matching a single union variant
+if let SuperBool.maybe(a, b) = who_knows; a == b {} # can be combined with another condition
+
+let mut nums: i32[6] = [...0];
+let mut iter = nums.iter_mut.();
+while let Option.some(item) = iter.next.() {} # let destructuring also works as a condition for loops
+
+match who_knows { # just for unions for now, pattern syntax is really hard
+	infer(yes) -> {}, # variants can be destructured without the union name
+	infer(maybe(a, b)) -> {}, # variants can be destructured
+	other -> {} # catch all branch, other is type SuperBool
+	# branches must be exhaustive
+}
+
+# functions
+fn thing0: i32(arg) -> i32 { return arg; } # functions have exactly one argument and one return value
+fn thing1: (arg0: i32, arg1: i32) -> i32 { arg0 + arg1 } # anonymous struct type for argument and implicit return
+fn thing2: (a: i32, b: i32) -> () {} # return type cannot be omitted
+
+let zero_again = thing0.(0); # functions can be called using using the .(arg) syntax
+let still_zero = thing1.(0, 0); # extra parentheses are not necessary if the argument is a struct
+
+type Tupleish = (pub a: i32, pub b: i32);
+fn do_math: Tupleish(args) -> Tupleish {} # only the argument slot can be given an arbitrary name
+
+fn swap_tuple: Tupleish(a, b) -> Tupleish(a as c, b as d) { # both the argument and return slots can be destructured
+	# 'as' can be used to rename items
+	c = b;
+	d = a;
+	# c = 2; # error c cannot be reassigned after initialization. use the mut keyword to opt into mutability
+	# return (0, 0); # this still works though
+	# implicit return if all return fields have been assigned
+}
+
+let tupleish_thing = Tupleish(1, 2);
+let backwards = swap_tuple(tupleish_thing); # instances of Tupleish can be passed directly
+
+let g = (a = 0, b = 0);
+let f1 = swap_tuple.(Tupleish(g)); # g must be explicitly cast because the argument slot is a named type
+let f2 = swap_tuple.(infer(g)); # type can be inferred
+
+# fields in both the argument and return slots can be given default values
+fn swap: (a: i32 = 0, b: i32 = 0) -> (c: i32 = b, d: i32 = a) {}
+
+let x = (a = 1, b = 0);
+let (c, d) = swap.(x); # since both x and the argument type are anonymous x can be passed without casting
+let (ccc, ddd) = swap.(b: 2); # function arguments/returns can be constructed/destructured with either named or positional fields
+
+fn distance: &Coordinates -> &Coordinates(other) -> f64 { # declare the Self type, essentially a method.
+	((self.lat - other.lat).exp(2) + (self.lng - other.lng).exp(2)).exp(0.5) # 'self' is a built in alias for the received value
+}
+
+type Distance = &Coordinates -> Self -> f64; # the type can be explicitly written like this
+# Self is a built in alias for the given self type &Coordinates
+
+let should_be_zero = position.distance.(position); # methods can be called using the dot operator
+let the_same_thing = Coordinates::distance.(position).(position); # methods can also be called like this where the first slot is the self type
+
+# interfaces
+interface Ahhh {
+	fn bbb: () -> (); # can include associated functions
+	fn set_num: &mut Self -> i32 -> (); # associated functions can access self
+	fn get_num: &Self -> () -> i32 { 0 } # default method implementation
+}
+
+impl i32: Ahhh {
+	fn bbb: () -> () {}
+	fn set_num: infer -> (num) -> infer { self.* = num; } # types can be inferred in signature only the arg slot can be renamed
+	fn get_num: infer -> infer -> infer { self.* } # defaults can be overridden
+}
+
+let three = 3.get_num.(); # associated methods can be accessed using the . operator on an instance of the interface
+Ahhh::set_num.(4).(6) # or like this
+
+# modules
+mod StuffInside { # modules are defined with the module keyword
+	# modules can include constant value aliases, type aliases, functions, and interfaces
+	let const y: i32 = 2;
+
+	type N = (
+		pub(mod) n: i32 # fields of structs can be made public only to the module
+		pub(mod, get) p: i32 = 0; # a scope can be can be combined with an access modifier
+	);
+
+	pub type P = (i32, i32); # items can be made publicly accessible using the pub keyword
+	pub(pkg) fn pp: () -> P { (0, 0) } # items can be made public to the package, but private to consumers of the package
+
+	inerface BasicallyAny {}
+	# pub fn (dyn BasicallyAny) -> () {} # error BasicallyAny is a private type
+}
+
+let i_got_p = StuffInside::pp(); # public items can be accessed using a double colon
+# let cant_get_n = StuffInside::N(n: 2); # error n is a private field
+
+# packages
+# file structure looks like this:
+# src/
+#	package.idk
+#	moduleName1/
+#		file1.idk
+#		module.idk
+#	moduleName2/
+#		subModule/
+#			module.idk
+#		file2.idk
+#		module.idk
+
+# compiler directives can be used to annotate parts of source code to hook into the compiler
+# package.idk cannot include any un-annotated declarations
+
+### begin package.idk ###
+![manifest] # manifest can be used to annotate a module as the manifest for the packages dependencies
+mod Deps {
+	pub const library = std::manifest::fetch_github("https://github.com/urmom/llll");
+}
+
+![index] # index is used to annotate a module as the entry point point when requiring the package
+mod Whatever {
+	pub(pkg) fn do_thing: () -> () {}
+	pub fn get_thing: () -> i32 { 0 }
+
+	# each top level module from the source directory is in scope here, as well as dependencies listed in the manifest
+	# pub use moduleName1;
+	# pub use moduleName2::subModule;
+	# pub use library::reExport;
+}
+
+![entry] # entry can be used to to annotate a function as the entry	point for the packages executable target
+fn whatever: () -> () {
+	# items from the index can be accessed using the pkg keyword from anywhere in the package
+	pkg::do_thing.();
+}
+
+### end package.idk ###
+
+# other ideas
+![allocator = std::Allocator()]
+![gc = std::GargabgeCollector()]
+![scheduler = std::Scheduler()]
