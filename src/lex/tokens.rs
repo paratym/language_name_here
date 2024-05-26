@@ -1,13 +1,11 @@
 use bimap::BiMap;
 use lazy_static::lazy_static;
-use std::{
-    cmp::Ordering,
-    collections::HashSet,
-    fmt::{self, Display},
-};
+use std::fmt::{self, Display};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum LexToken {
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Token {
+    Comment(Box<str>),
+    Ident(Box<str>),
     Equal,
     As,
     Let,
@@ -26,6 +24,9 @@ pub enum LexToken {
     True,
     False,
     Char,
+    CharLit(Box<str>),
+    Str,
+    StrLit(Box<str>),
     Isize,
     I8,
     I16,
@@ -40,6 +41,7 @@ pub enum LexToken {
     U64,
     F32,
     F64,
+    NumLit(Box<str>),
     LParen,
     Rparen,
     Colon,
@@ -69,26 +71,11 @@ pub enum LexToken {
     Interface,
     Impl,
     Bang,
+    LAngleBrace,
+    RAngleBrace,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum Literal {
-    Char(char),
-    Str(Box<str>),
-    Int(i64),
-    Uint(u64),
-    Float(f64),
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Token {
-    Lex(LexToken),
-    Lit(Literal),
-    Ident(Box<str>),
-    Comment(Box<str>),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct SrcPosition {
     pub line: usize,
     pub column: usize,
@@ -101,137 +88,86 @@ pub struct SrcToken {
 }
 
 lazy_static! {
-    pub static ref LEX_TOKENS: BiMap<LexToken, &'static str> = {
+    pub static ref LEX_TOKENS: BiMap<Token, &'static str> = {
         let mut map = BiMap::new();
-        map.insert(LexToken::Equal, "=");
-        map.insert(LexToken::As, "as");
-        map.insert(LexToken::Let, "let");
-        map.insert(LexToken::Mut, "mut");
-        map.insert(LexToken::Const, "const");
-        map.insert(LexToken::Static, "static");
-        map.insert(LexToken::Asterisk, "*");
-        map.insert(LexToken::Ampersand, "&");
-        map.insert(LexToken::Pub, "pub");
-        map.insert(LexToken::Mod, "mod");
-        map.insert(LexToken::Pkg, "pkg");
-        map.insert(LexToken::Use, "use");
-        map.insert(LexToken::DoubleColon, "::");
-        map.insert(LexToken::Type, "type");
-        map.insert(LexToken::Bool, "bool");
-        map.insert(LexToken::True, "true");
-        map.insert(LexToken::False, "false");
-        map.insert(LexToken::Char, "char");
-        map.insert(LexToken::Isize, "isize");
-        map.insert(LexToken::I8, "i8");
-        map.insert(LexToken::I16, "i16");
-        map.insert(LexToken::I24, "i24");
-        map.insert(LexToken::I32, "i32");
-        map.insert(LexToken::I64, "i64");
-        map.insert(LexToken::Usize, "usize");
-        map.insert(LexToken::U8, "u8");
-        map.insert(LexToken::U16, "u16");
-        map.insert(LexToken::U24, "u24");
-        map.insert(LexToken::U32, "u32");
-        map.insert(LexToken::U64, "u64");
-        map.insert(LexToken::F32, "f32");
-        map.insert(LexToken::F64, "f64");
-        map.insert(LexToken::LParen, "(");
-        map.insert(LexToken::Rparen, ")");
-        map.insert(LexToken::Colon, ":");
-        map.insert(LexToken::Comma, ",");
-        map.insert(LexToken::Dot, ".");
-        map.insert(LexToken::Hyphen, "-");
-        map.insert(LexToken::Underscore, "_");
-        map.insert(LexToken::Get, "get");
-        map.insert(LexToken::Set, "set");
-        map.insert(LexToken::Union, "union");
-        map.insert(LexToken::LSqrBrace, "[");
-        map.insert(LexToken::RSqrBrace, "]");
-        map.insert(LexToken::Elipsis, "...");
-        map.insert(LexToken::Semicolon, ";");
-        map.insert(LexToken::Fn, "fn");
-        map.insert(LexToken::Arrow, "->");
-        map.insert(LexToken::LCurlyBrace, "{");
-        map.insert(LexToken::RCurlyBrace, "}");
-        map.insert(LexToken::Return, "return");
-        map.insert(LexToken::Defer, "defer");
-        map.insert(LexToken::If, "if");
-        map.insert(LexToken::Else, "else");
-        map.insert(LexToken::While, "while");
-        map.insert(LexToken::Break, "break");
-        map.insert(LexToken::Continue, "continue");
-        map.insert(LexToken::Match, "match");
-        map.insert(LexToken::Interface, "interface");
-        map.insert(LexToken::Impl, "impl");
-        map.insert(LexToken::Bang, "!");
+        map.insert(Token::Equal, "=");
+        map.insert(Token::As, "as");
+        map.insert(Token::Let, "let");
+        map.insert(Token::Mut, "mut");
+        map.insert(Token::Const, "const");
+        map.insert(Token::Static, "static");
+        map.insert(Token::Asterisk, "*");
+        map.insert(Token::Ampersand, "&");
+        map.insert(Token::Pub, "pub");
+        map.insert(Token::Mod, "mod");
+        map.insert(Token::Pkg, "pkg");
+        map.insert(Token::Use, "use");
+        map.insert(Token::DoubleColon, "::");
+        map.insert(Token::Type, "type");
+        map.insert(Token::Bool, "bool");
+        map.insert(Token::True, "true");
+        map.insert(Token::False, "false");
+        map.insert(Token::Char, "char");
+        map.insert(Token::Isize, "isize");
+        map.insert(Token::I8, "i8");
+        map.insert(Token::I16, "i16");
+        map.insert(Token::I24, "i24");
+        map.insert(Token::I32, "i32");
+        map.insert(Token::I64, "i64");
+        map.insert(Token::Usize, "usize");
+        map.insert(Token::U8, "u8");
+        map.insert(Token::U16, "u16");
+        map.insert(Token::U24, "u24");
+        map.insert(Token::U32, "u32");
+        map.insert(Token::U64, "u64");
+        map.insert(Token::F32, "f32");
+        map.insert(Token::F64, "f64");
+        map.insert(Token::LParen, "(");
+        map.insert(Token::Rparen, ")");
+        map.insert(Token::Colon, ":");
+        map.insert(Token::Comma, ",");
+        map.insert(Token::Dot, ".");
+        map.insert(Token::Hyphen, "-");
+        map.insert(Token::Underscore, "_");
+        map.insert(Token::Get, "get");
+        map.insert(Token::Set, "set");
+        map.insert(Token::Union, "union");
+        map.insert(Token::LSqrBrace, "[");
+        map.insert(Token::RSqrBrace, "]");
+        map.insert(Token::Elipsis, "...");
+        map.insert(Token::Semicolon, ";");
+        map.insert(Token::Fn, "fn");
+        map.insert(Token::Arrow, "->");
+        map.insert(Token::LCurlyBrace, "{");
+        map.insert(Token::RCurlyBrace, "}");
+        map.insert(Token::Return, "return");
+        map.insert(Token::Defer, "defer");
+        map.insert(Token::If, "if");
+        map.insert(Token::Else, "else");
+        map.insert(Token::While, "while");
+        map.insert(Token::Break, "break");
+        map.insert(Token::Continue, "continue");
+        map.insert(Token::Match, "match");
+        map.insert(Token::Interface, "interface");
+        map.insert(Token::Impl, "impl");
+        map.insert(Token::Bang, "!");
+        map.insert(Token::LAngleBrace, "<");
+        map.insert(Token::RAngleBrace, ">");
         map
     };
-    pub static ref MAX_LEX_TOKEN_LEN: usize = LEX_TOKENS
-        .right_values()
-        .reduce(|a, b| if b.len() > a.len() { b } else { a })
-        .map(|t| t.len())
-        .expect("missing tokens");
-    pub static ref LIT_PRFIXES: HashSet<char> = {
-        let mut set = HashSet::new();
-        set.insert('"');
-        set.insert('\'');
-        set.insert('+');
-        set.insert('-');
-        set.insert('0');
-        set.insert('1');
-        set.insert('2');
-        set.insert('3');
-        set.insert('4');
-        set.insert('5');
-        set.insert('6');
-        set.insert('7');
-        set.insert('8');
-        set.insert('9');
-        set
-    };
-}
-
-impl From<LexToken> for Token {
-    fn from(lex: LexToken) -> Self {
-        Self::Lex(lex)
-    }
-}
-
-impl From<Literal> for Token {
-    fn from(lit: Literal) -> Self {
-        Self::Lit(lit)
-    }
-}
-
-impl Display for LexToken {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str(
-            LEX_TOKENS
-                .get_by_left(self)
-                .expect("missing token definition"),
-        )
-    }
-}
-
-impl Display for Literal {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Literal::Char(value) => write!(f, "'{}'", value),
-            Literal::Str(value) => write!(f, "\"{}\"", value),
-            Literal::Int(value) => value.fmt(f),
-            Literal::Uint(value) => value.fmt(f),
-            Literal::Float(value) => value.fmt(f),
-        }
-    }
+    pub static ref MAX_LEX_TOKEN_LEN: usize =
+        LEX_TOKENS.right_values().map(|t| t.len()).max().unwrap();
 }
 
 impl Display for Token {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Token::Lex(tok) => tok.fmt(f),
-            Token::Lit(tok) => tok.fmt(f),
-            Token::Ident(tok) => tok.fmt(f),
-            Token::Comment(tok) => tok.fmt(f),
+            Self::Comment(val)
+            | Self::Ident(val)
+            | Self::CharLit(val)
+            | Self::StrLit(val)
+            | Self::NumLit(val) => f.write_str(val),
+            _ => f.write_str(LEX_TOKENS.get_by_left(self).ok_or(fmt::Error)?),
         }
     }
 }
