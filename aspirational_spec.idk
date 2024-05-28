@@ -104,8 +104,8 @@ let i_do = SuperBool.maybeInline(true, true);
 let me_too = SuperBool.yes();
 
 # control flow
-if 2 < 3 {}
-if let i = 2; i < 3 {} # same as the above
+if 2.less_than.(3) {}
+if let i = 2; i.less_than.(3) {} # same as the above
 # i is not accessible outside of the block
 
 if false {
@@ -119,7 +119,7 @@ if let a = false; a {
 }
 
 while false {} # the only loop keyword
-while let mut i = 0; i < 5 { i += 1 }
+while let mut i = 0; i.less_than.(5) { i.add(1) }
 
 if let SuperBool.maybe(a, b) = who_knows {} # 'if let Variant = value' can be used to create a branch matching a single union variant
 if let SuperBool.maybe(a, b) = who_knows; a == b {} # can be combined with another condition
@@ -137,7 +137,7 @@ match who_knows { # just for unions for now, pattern syntax is really hard
 
 # functions
 fn thing0: i32(arg) -> i32 { return arg; } # functions have exactly one argument and one return value
-fn thing1: (arg0: i32, arg1: i32) -> i32 { arg0 + arg1 } # anonymous struct type for argument and implicit return
+fn thing1: (arg0: i32, arg1: i32) -> i32 { arg0.sum(arg1) } # anonymous struct type for argument and implicit return
 fn thing2: (a: i32, b: i32) -> () {} # return type cannot be omitted
 
 let zero_again = thing0.(0); # functions can be called using using the .(arg) syntax
@@ -170,7 +170,7 @@ let (c, d) = swap.(x); # since both x and the argument type are anonymous x can 
 let (ccc, ddd) = swap.(b: 2); # function arguments/returns can be constructed/destructured with either named or positional fields
 
 fn distance: &Coordinates -> &Coordinates(other) -> f64 { # declare the Self type, essentially a method.
-	((self.lat - other.lat).exp(2) + (self.lng - other.lng).exp(2)).exp(0.5) # 'self' is a built in alias for the received value
+	((self.lat - other.lat).exp(2).sum.((self.lng - other.lng).exp(2))).exp(0.5) # 'self' is a built in alias for the received value
 }
 
 type Distance = &Coordinates -> Self -> f64; # the type can be explicitly written like this

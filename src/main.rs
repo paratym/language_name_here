@@ -1,4 +1,6 @@
 use std::{fs::File, io::BufReader};
+
+pub mod ast;
 pub mod lex;
 
 fn main() {

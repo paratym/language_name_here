@@ -20,6 +20,7 @@ pub enum Token {
     Use,
     DoubleColon,
     Type,
+    Infer,
     Bool,
     True,
     False,
@@ -104,6 +105,7 @@ lazy_static! {
         map.insert(Token::Use, "use");
         map.insert(Token::DoubleColon, "::");
         map.insert(Token::Type, "type");
+        map.insert(Token::Infer, "infer");
         map.insert(Token::Bool, "bool");
         map.insert(Token::True, "true");
         map.insert(Token::False, "false");

@@ -1,5 +1,5 @@
 use crate::lex::*;
-use std::io::{self, BufRead};
+use std::io::BufRead;
 
 pub struct Lexer {
     reader: Box<dyn BufRead>,
@@ -110,7 +110,7 @@ impl Lexer {
 
     fn read_comment(&mut self) -> LexResult<Option<Token>> {
         let buf = self.peek_buf()?;
-        if buf.bytes().nth(0) != Some(b'#') {
+        if buf.as_bytes().first() != Some(&b'#') {
             return Ok(None);
         }
 
@@ -136,7 +136,7 @@ impl Lexer {
                 .find(|(i, c)| {
                     !(*c == '_'
                         || c.is_alphabetic()
-                        || ((*i > 0 || ident.len() > 0) && c.is_numeric()))
+                        || ((*i > 0 || !ident.is_empty()) && c.is_numeric()))
                 })
                 .map(|x| x.0)
                 .unwrap_or(buf_byte_len);
@@ -158,7 +158,7 @@ impl Lexer {
     }
 
     fn read_str_lit(&mut self) -> LexResult<Option<Token>> {
-        let mut escaped = false;
+        let mut escaped = true;
 
         let mut lit = String::new();
         loop {
@@ -166,7 +166,7 @@ impl Lexer {
             let buf_byte_len = buf.len();
             if buf_byte_len == 0 {
                 break;
-            } else if lit.is_empty() && buf.bytes().nth(0) != Some(b'"') {
+            } else if lit.is_empty() && buf.as_bytes().first() != Some(&b'"') {
                 return Ok(None);
             }
 
@@ -186,7 +186,7 @@ impl Lexer {
                     break;
                 }
 
-                escaped = if c == '\\' && !escaped { true } else { false };
+                escaped = c == '\\' && !escaped;
             }
 
             lit.push_str(&buf[..end_i]);
@@ -207,7 +207,7 @@ impl Lexer {
     }
 
     fn read_char_lit(&mut self) -> LexResult<Option<Token>> {
-        let mut escaped = false;
+        let mut escaped = true;
 
         let mut lit = String::new();
         loop {
@@ -215,7 +215,7 @@ impl Lexer {
             let buf_byte_len = buf.len();
             if buf_byte_len == 0 {
                 break;
-            } else if lit.is_empty() && buf.bytes().nth(0) != Some(b'\'') {
+            } else if lit.is_empty() && buf.as_bytes().first() != Some(&b'\'') {
                 return Ok(None);
             }
 
@@ -233,7 +233,7 @@ impl Lexer {
                     });
                 }
 
-                escaped = if c == '\\' && !escaped { true } else { false };
+                escaped = c == '\\' && !escaped;
             }
 
             lit.push_str(&buf[..end_i]);
@@ -298,7 +298,7 @@ impl Lexer {
                     continue;
                 }
 
-                let base_ch_i = if signed { 2 } else { 1 };
+                let base_ch_i = signed as usize + 1;
                 if i == base_ch_i && first_digit == '0' && (c == 'b' || c == 'o' || c == 'x') {
                     if !is_valid_digit(c, chars.peek().unwrap_or(&(0, NULL_CH)).1) {
                         end_i = i;
@@ -331,14 +331,8 @@ impl Lexer {
 
     fn read_lex(&mut self) -> LexResult<Option<Token>> {
         let buf = self.peek_buf()?;
-        if buf.len() < *MAX_LEX_TOKEN_LEN {
-            return Err(LexErr::Io(io::Error::new(
-                io::ErrorKind::OutOfMemory,
-                "lex buffer smaller than max token length",
-            )));
-        }
-
-        for n in (1..*MAX_LEX_TOKEN_LEN).rev() {
+        let max = MAX_LEX_TOKEN_LEN.min(buf.len());
+        for n in (1..max).rev() {
             if let Some(tok) = LEX_TOKENS.get_by_right(&buf[..n]) {
                 self.reader.consume(n);
                 self.pos.column += n;
@@ -351,11 +345,10 @@ impl Lexer {
 }
 
 fn is_valid_digit(base: char, digit: char) -> bool {
-    match (base, digit) {
+    matches!((base, digit),
         (NULL_CH, '0'..='9')
         | ('b', '0'..='1')
         | ('o', '0'..='7')
-        | ('x', '0'..='9' | 'a'..='f' | 'A'..='F') => true,
-        _ => false,
-    }
+        | ('x', '0'..='9' | 'a'..='f' | 'A'..='F')
+    )
 }
