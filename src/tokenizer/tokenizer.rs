@@ -1,14 +1,14 @@
-use crate::lex::*;
+use crate::tokenizer::*;
 use std::io::BufRead;
 
-pub struct Lexer {
+pub struct Tokenizer {
     reader: Box<dyn BufRead>,
     pos: SrcPosition,
 }
 
 const NULL_CH: char = 0 as char;
 
-impl Lexer {
+impl Tokenizer {
     pub fn new(reader: Box<dyn BufRead>) -> Self {
         Self {
             reader,
@@ -16,7 +16,7 @@ impl Lexer {
         }
     }
 
-    fn peek_buf(&mut self) -> LexResult<&str> {
+    fn peek_buf(&mut self) -> TokResult<&str> {
         let buf = self.reader.fill_buf()?;
         let mut end_i = buf.len();
         loop {
@@ -25,7 +25,7 @@ impl Lexer {
                 Err(e) => {
                     end_i = e.valid_up_to();
                     if end_i == 0 {
-                        return Err(LexErr::Syntax {
+                        return Err(TokErr::Syntax {
                             pos: self.pos,
                             msg: "invalid utf8 character",
                         });
@@ -35,7 +35,7 @@ impl Lexer {
         }
     }
 
-    pub fn next_token(&mut self) -> LexResult<Option<SrcToken>> {
+    pub fn next_token(&mut self) -> TokResult<Option<SrcToken>> {
         let ch = loop {
             let buf = self.peek_buf()?;
             let buf_len = buf.len();
@@ -73,14 +73,14 @@ impl Lexer {
             '\'' => self.read_char_lit(),
             '+' | '-' => self.read_num_lit(),
             ch if ch.is_ascii_digit() => self.read_num_lit(),
-            '_' => self.read_ident(),
-            ch if ch.is_ascii_alphabetic() => self.read_ident(),
+            '_' => self.read_alias(),
+            ch if ch.is_ascii_alphabetic() => self.read_alias(),
             _ => Ok(None),
         }?;
 
         if let Some(tok) = var_token {
             if let Token::Comment(ref s)
-            | Token::Ident(ref s)
+            | Token::Alias(ref s)
             | Token::CharLit(ref s)
             | Token::StrLit(ref s)
             | Token::NumLit(ref s) = tok
@@ -101,14 +101,14 @@ impl Lexer {
         } else if let Some(tok) = self.read_lex()? {
             Ok(Some(SrcToken { tok, pos }))
         } else {
-            Err(LexErr::Syntax {
+            Err(TokErr::Syntax {
                 msg: "unrecognized token",
                 pos,
             })
         }
     }
 
-    fn read_comment(&mut self) -> LexResult<Option<Token>> {
+    fn read_comment(&mut self) -> TokResult<Option<Token>> {
         let buf = self.peek_buf()?;
         if buf.as_bytes().first() != Some(&b'#') {
             return Ok(None);
@@ -122,8 +122,8 @@ impl Lexer {
         Ok(Some(Token::Comment(comment.into())))
     }
 
-    fn read_ident(&mut self) -> LexResult<Option<Token>> {
-        let mut ident = String::new();
+    fn read_alias(&mut self) -> TokResult<Option<Token>> {
+        let mut alias = String::new();
         loop {
             let buf = self.peek_buf()?;
             let buf_byte_len = buf.len();
@@ -136,12 +136,12 @@ impl Lexer {
                 .find(|(i, c)| {
                     !(*c == '_'
                         || c.is_alphabetic()
-                        || ((*i > 0 || !ident.is_empty()) && c.is_numeric()))
+                        || ((*i > 0 || !alias.is_empty()) && c.is_numeric()))
                 })
                 .map(|x| x.0)
                 .unwrap_or(buf_byte_len);
 
-            ident.push_str(&buf[..end_i]);
+            alias.push_str(&buf[..end_i]);
             self.reader.consume(end_i);
             self.pos.column += end_i;
 
@@ -150,14 +150,14 @@ impl Lexer {
             }
         }
 
-        Ok(if ident.is_empty() {
+        Ok(if alias.is_empty() {
             None
         } else {
-            Some(Token::Ident(ident.into()))
+            Some(Token::Alias(alias.into()))
         })
     }
 
-    fn read_str_lit(&mut self) -> LexResult<Option<Token>> {
+    fn read_str_lit(&mut self) -> TokResult<Option<Token>> {
         let mut escaped = true;
 
         let mut lit = String::new();
@@ -206,7 +206,7 @@ impl Lexer {
         })
     }
 
-    fn read_char_lit(&mut self) -> LexResult<Option<Token>> {
+    fn read_char_lit(&mut self) -> TokResult<Option<Token>> {
         let mut escaped = true;
 
         let mut lit = String::new();
@@ -227,7 +227,7 @@ impl Lexer {
                 } else if c == '\n' {
                     self.reader.consume(i);
                     self.pos.column += i;
-                    return Err(LexErr::Syntax {
+                    return Err(TokErr::Syntax {
                         msg: "unexpected new line",
                         pos: self.pos,
                     });
@@ -252,7 +252,7 @@ impl Lexer {
         })
     }
 
-    fn read_num_lit(&mut self) -> LexResult<Option<Token>> {
+    fn read_num_lit(&mut self) -> TokResult<Option<Token>> {
         let mut signed = false;
         let mut float = false;
         let mut first_digit = NULL_CH;
@@ -329,7 +329,7 @@ impl Lexer {
         })
     }
 
-    fn read_lex(&mut self) -> LexResult<Option<Token>> {
+    fn read_lex(&mut self) -> TokResult<Option<Token>> {
         let buf = self.peek_buf()?;
         let max = MAX_LEX_TOKEN_LEN.min(buf.len());
         for n in (1..max).rev() {

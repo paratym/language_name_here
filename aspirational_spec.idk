@@ -15,7 +15,8 @@ let d: &i32 = c.& # reference to c
 let mut e: &mut i32 = c.&mut # mutable reference to c
 let f: i32 = e.* # deref e
 
-let const d: i32 = 0; # known at compile time
+let const g: i32 = 0; # known at compile time
+let lazy h: i32 = 1.add(1); # not evaluated until first usage
 
 # type aliases
 type YesNo = bool;
@@ -122,15 +123,15 @@ while false {} # the only loop keyword
 while let mut i = 0; i.less_than.(5) { i.add(1) }
 
 if let SuperBool.maybe(a, b) = who_knows {} # 'if let Variant = value' can be used to create a branch matching a single union variant
-if let SuperBool.maybe(a, b) = who_knows; a == b {} # can be combined with another condition
+if let SuperBool.maybe(a, b) = who_knows; a.eq(b) {} # can be combined with another condition
 
 let mut nums: i32[6] = [...0];
 let mut iter = nums.iter_mut.();
 while let Option.some(item) = iter.next.() {} # let destructuring also works as a condition for loops
 
 match who_knows { # just for unions for now, pattern syntax is really hard
-	infer(yes) -> {}, # variants can be destructured without the union name
-	infer(maybe(a, b)) -> {}, # variants can be destructured
+	(yes) -> {}, # variants can be destructured without the union name
+	(maybe(a, b)) -> {}, # variants can be destructured
 	other -> {} # catch all branch, other is type SuperBool
 	# branches must be exhaustive
 }
@@ -186,7 +187,7 @@ interface Ahhh {
 	fn get_num: &Self -> () -> i32 { 0 } # default method implementation
 }
 
-impl i32: Ahhh {
+impl Ahhh<i32> {
 	fn bbb: () -> () {}
 	fn set_num: infer -> (num) -> infer { self.* = num; } # types can be inferred in signature only the arg slot can be renamed
 	fn get_num: infer -> infer -> infer { self.* } # defaults can be overridden

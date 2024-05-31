@@ -5,13 +5,13 @@ use std::fmt::{self, Display};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Token {
     Comment(Box<str>),
-    Ident(Box<str>),
+    Alias(Box<str>),
     Equal,
     As,
     Let,
     Mut,
     Const,
-    Static,
+    Lazy,
     Asterisk,
     Ampersand,
     Pub,
@@ -96,7 +96,7 @@ lazy_static! {
         map.insert(Token::Let, "let");
         map.insert(Token::Mut, "mut");
         map.insert(Token::Const, "const");
-        map.insert(Token::Static, "static");
+        map.insert(Token::Lazy, "lazy");
         map.insert(Token::Asterisk, "*");
         map.insert(Token::Ampersand, "&");
         map.insert(Token::Pub, "pub");
@@ -165,7 +165,7 @@ impl Display for Token {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Comment(val)
-            | Self::Ident(val)
+            | Self::Alias(val)
             | Self::CharLit(val)
             | Self::StrLit(val)
             | Self::NumLit(val) => f.write_str(val),

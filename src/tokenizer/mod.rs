@@ -1,7 +1,7 @@
 mod error;
-mod lexer;
+mod tokenizer;
 mod tokens;
 
 pub use error::*;
-pub use lexer::*;
+pub use tokenizer::*;
 pub use tokens::*;
