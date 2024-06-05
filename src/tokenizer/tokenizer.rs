@@ -4,6 +4,7 @@ use std::io::BufRead;
 pub struct Tokenizer {
     reader: Box<dyn BufRead>,
     pos: SrcPosition,
+    cached: Option<SrcToken>,
 }
 
 const NULL_CH: char = 0 as char;
@@ -13,6 +14,7 @@ impl Tokenizer {
         Self {
             reader,
             pos: SrcPosition { line: 0, column: 0 },
+            cached: None,
         }
     }
 
@@ -35,12 +37,36 @@ impl Tokenizer {
         }
     }
 
-    pub fn next_token(&mut self) -> TokResult<Option<SrcToken>> {
+    pub fn pos(&self) -> &SrcPosition {
+        &self.pos
+    }
+
+    pub fn peek_token(&mut self) -> TokResult<&SrcToken> {
+        if let Some(ref tok) = self.cached {
+            return Ok(tok);
+        }
+
+        self.cached = match self.next_token() {
+            Ok(tok) => Some(tok),
+            Err(TokErr::ReaderEmpty) => None,
+            Err(e) => return Err(e),
+        };
+
+        return Ok(self.cached.as_ref().unwrap());
+    }
+
+    pub fn next_token(&mut self) -> TokResult<SrcToken> {
+        if let Some(ref tok) = self.cached {
+            let token = tok.clone();
+            self.cached = None;
+            return Ok(token);
+        }
+
         let ch = loop {
             let buf = self.peek_buf()?;
             let buf_len = buf.len();
             if buf_len == 0 {
-                return Ok(None);
+                return Err(TokErr::ReaderEmpty);
             }
 
             let mut start_ch = (buf_len, '\0');
@@ -68,50 +94,47 @@ impl Tokenizer {
 
         let pos = self.pos;
         let var_token = match ch {
-            '#' => self.read_comment(),
-            '"' => self.read_str_lit(),
-            '\'' => self.read_char_lit(),
-            '+' | '-' => self.read_num_lit(),
-            ch if ch.is_ascii_digit() => self.read_num_lit(),
-            '_' => self.read_alias(),
-            ch if ch.is_ascii_alphabetic() => self.read_alias(),
-            _ => Ok(None),
-        }?;
+            '#' => Some(self.read_comment()),
+            '"' => Some(self.read_str_lit()),
+            '\'' => Some(self.read_char_lit()),
+            '+' | '-' => Some(self.read_num_lit()),
+            ch if ch.is_ascii_digit() => Some(self.read_num_lit()),
+            '_' => Some(self.read_alias()),
+            ch if ch.is_ascii_alphabetic() => Some(self.read_alias()),
+            _ => None,
+        };
 
-        if let Some(tok) = var_token {
-            if let Token::Comment(ref s)
-            | Token::Alias(ref s)
-            | Token::CharLit(ref s)
-            | Token::StrLit(ref s)
-            | Token::NumLit(ref s) = tok
-            {
-                if let Some(tok) = LEX_TOKENS.get_by_right(s.as_ref()) {
-                    return Ok(Some(SrcToken {
-                        tok: tok.clone(),
-                        pos,
-                    }));
-                }
-            }
+        let tok = match var_token.transpose() {
+            Ok(Some(tok)) => LEX_TOKENS
+                .get_by_right(tok.to_string().as_str())
+                .cloned()
+                .unwrap_or(tok),
+            Ok(None) => self.read_lex()?,
+            Err(e) => return Err(e),
+        };
 
-            return Ok(Some(SrcToken { tok, pos }));
-        }
-
-        if let Some(tok) = var_token {
-            Ok(Some(SrcToken { tok, pos }))
-        } else if let Some(tok) = self.read_lex()? {
-            Ok(Some(SrcToken { tok, pos }))
-        } else {
-            Err(TokErr::Syntax {
-                msg: "unrecognized token",
-                pos,
-            })
-        }
+        Ok(SrcToken { tok, pos })
     }
 
-    fn read_comment(&mut self) -> TokResult<Option<Token>> {
+    pub fn expect_token(&mut self, tok: &Token) -> TokResult<SrcToken> {
+        let token = self.next_token()?;
+        if &token.tok != tok {
+            return Err(TokErr::Syntax {
+                pos: token.pos,
+                msg: "unexpected token",
+            });
+        }
+
+        Ok(token)
+    }
+
+    fn read_comment(&mut self) -> TokResult<Token> {
         let buf = self.peek_buf()?;
         if buf.as_bytes().first() != Some(&b'#') {
-            return Ok(None);
+            return Err(TokErr::Syntax {
+                pos: self.pos,
+                msg: "expected comment",
+            });
         }
 
         let mut comment = String::new();
@@ -119,10 +142,10 @@ impl Tokenizer {
         self.pos.line += 1;
         self.pos.column = 0;
 
-        Ok(Some(Token::Comment(comment.into())))
+        Ok(Token::Comment(comment.into()))
     }
 
-    fn read_alias(&mut self) -> TokResult<Option<Token>> {
+    fn read_alias(&mut self) -> TokResult<Token> {
         let mut alias = String::new();
         loop {
             let buf = self.peek_buf()?;
@@ -150,14 +173,17 @@ impl Tokenizer {
             }
         }
 
-        Ok(if alias.is_empty() {
-            None
-        } else {
-            Some(Token::Alias(alias.into()))
-        })
+        if alias.is_empty() {
+            return Err(TokErr::Syntax {
+                pos: self.pos,
+                msg: "expected alias",
+            });
+        }
+
+        Ok(Token::Alias(alias.into()))
     }
 
-    fn read_str_lit(&mut self) -> TokResult<Option<Token>> {
+    fn read_str_lit(&mut self) -> TokResult<Token> {
         let mut escaped = true;
 
         let mut lit = String::new();
@@ -167,7 +193,10 @@ impl Tokenizer {
             if buf_byte_len == 0 {
                 break;
             } else if lit.is_empty() && buf.as_bytes().first() != Some(&b'"') {
-                return Ok(None);
+                return Err(TokErr::Syntax {
+                    pos: self.pos,
+                    msg: "expected string literal",
+                });
             }
 
             let mut offset = SrcPosition::default();
@@ -199,14 +228,10 @@ impl Tokenizer {
             }
         }
 
-        Ok(if lit.is_empty() {
-            None
-        } else {
-            Some(Token::StrLit(lit.into()))
-        })
+        Ok(Token::StrLit(lit.into()))
     }
 
-    fn read_char_lit(&mut self) -> TokResult<Option<Token>> {
+    fn read_char_lit(&mut self) -> TokResult<Token> {
         let mut escaped = true;
 
         let mut lit = String::new();
@@ -216,7 +241,10 @@ impl Tokenizer {
             if buf_byte_len == 0 {
                 break;
             } else if lit.is_empty() && buf.as_bytes().first() != Some(&b'\'') {
-                return Ok(None);
+                return Err(TokErr::Syntax {
+                    pos: self.pos,
+                    msg: "expected character literal",
+                });
             }
 
             let mut end_i = buf_byte_len;
@@ -245,14 +273,10 @@ impl Tokenizer {
             }
         }
 
-        Ok(if lit.is_empty() {
-            None
-        } else {
-            Some(Token::CharLit(lit.into()))
-        })
+        Ok(Token::CharLit(lit.into()))
     }
 
-    fn read_num_lit(&mut self) -> TokResult<Option<Token>> {
+    fn read_num_lit(&mut self) -> TokResult<Token> {
         let mut signed = false;
         let mut float = false;
         let mut first_digit = NULL_CH;
@@ -280,7 +304,10 @@ impl Tokenizer {
 
                 if (c == '+' || c == '-') && first_digit == NULL_CH {
                     if !is_valid_digit(base_ch, chars.peek().unwrap_or(&(0, NULL_CH)).1) {
-                        return Ok(None);
+                        return Err(TokErr::Syntax {
+                            pos: self.pos,
+                            msg: "signs can only be declared in integer literals",
+                        });
                     }
 
                     signed = true;
@@ -322,25 +349,31 @@ impl Tokenizer {
             }
         }
 
-        Ok(if first_digit == NULL_CH {
-            None
-        } else {
-            Some(Token::NumLit(lit.into()))
-        })
+        if first_digit == NULL_CH {
+            return Err(TokErr::Syntax {
+                pos: self.pos,
+                msg: "expected numeric literal",
+            });
+        }
+
+        Ok(Token::NumLit(lit.into()))
     }
 
-    fn read_lex(&mut self) -> TokResult<Option<Token>> {
+    fn read_lex(&mut self) -> TokResult<Token> {
         let buf = self.peek_buf()?;
         let max = MAX_LEX_TOKEN_LEN.min(buf.len());
         for n in (1..max).rev() {
             if let Some(tok) = LEX_TOKENS.get_by_right(&buf[..n]) {
                 self.reader.consume(n);
                 self.pos.column += n;
-                return Ok(Some(tok.clone()));
+                return Ok(tok.clone());
             }
         }
 
-        Ok(None)
+        Err(TokErr::Syntax {
+            pos: self.pos,
+            msg: "expected lexical token",
+        })
     }
 }
 

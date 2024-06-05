@@ -2,8 +2,9 @@ use crate::tokenizer::SrcPosition;
 
 #[derive(Debug)]
 pub enum TokErr {
-    Syntax { pos: SrcPosition, msg: &'static str },
     Io(std::io::Error),
+    Syntax { pos: SrcPosition, msg: &'static str },
+    ReaderEmpty,
 }
 
 pub type TokResult<T> = Result<T, TokErr>;

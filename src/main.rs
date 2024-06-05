@@ -1,13 +1,13 @@
+use ast::AstNode;
 use std::{fs::File, io::BufReader};
 
 pub mod ast;
-pub mod parser;
 pub mod tokenizer;
+pub mod util;
 
 fn main() {
-    let file = BufReader::new(File::open("aspirational_spec.idk").unwrap());
-    let mut tokenizer = tokenizer::Tokenizer::new(Box::new(file));
-    while let Some(tok) = tokenizer.next_token().unwrap() {
-        println!("{:?}", tok);
-    }
+    let file = BufReader::new(File::open("./tour/package.idk").unwrap());
+    let mut tok = tokenizer::Tokenizer::new(Box::new(file));
+    let pkg = ast::ConstScope::parse(&mut tok);
+    println!("{:?}", pkg);
 }
