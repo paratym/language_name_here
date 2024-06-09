@@ -1,6 +1,7 @@
 use crate::{
     ast::{
-        Alias, AstNode, ConstScope, ExecScope, LhsExpr, ParseErr, ParseResult, RhsExpr, StructType,
+        Alias, AstNode, CompoundType, ConstScope, ExecScope, LhsExpr, ParseErr, ParseResult,
+        RhsExpr,
     },
     tokenizer::{Token, Tokenizer},
 };
@@ -9,6 +10,7 @@ use std::rc::Rc;
 #[derive(Debug)]
 pub enum AliasEval {
     Let,
+    Mut,
     Const,
     Type,
 }
@@ -22,17 +24,9 @@ pub struct AliasDecl {
 }
 
 #[derive(Debug)]
-pub struct FnSignature {
-    pub alias: Alias,
-    pub rcv: Option<RhsExpr>,
-    pub arg: RhsExpr,
-    pub ret: RhsExpr,
-}
-
-#[derive(Debug)]
 pub enum FnSlotDecl {
     Named(RhsExpr, Option<LhsExpr>),
-    Inline(StructType),
+    Inline(CompoundType),
 }
 
 #[derive(Debug)]
@@ -53,7 +47,7 @@ pub struct IfaceDecl {
 #[derive(Debug)]
 pub struct ModDecl {
     pub alias: Alias,
-    pub scope: ConstScope,
+    pub scope: Option<ConstScope>,
 }
 
 #[derive(Debug)]
@@ -77,48 +71,44 @@ pub enum Decl {
 
 impl AstNode for AliasEval {
     fn parse(tok: &mut Tokenizer) -> ParseResult<Self> {
-        todo!()
+        let token = tok.next_token()?;
+        Ok(match token.tok {
+            Token::Let => Self::Let,
+            Token::Mut => Self::Mut,
+            Token::Const => Self::Const,
+            Token::Type => Self::Type,
+            _ => {
+                return Err(ParseErr::Syntax {
+                    pos: token.pos,
+                    msg: "expected 'let', 'mut', 'const', or 'type'",
+                })
+            }
+        })
     }
 }
 
 impl AstNode for AliasDecl {
     fn parse(tok: &mut Tokenizer) -> ParseResult<Self> {
-        // tok.expect_token(&Token::Let);
-        // let token = tok.peek_token()?.clone().tok;
-        // let eval = if matches!(token, Token::Mut | Token::Const | Token::Type) {
-        //     tok.expect_token(&token);
-        //     Some(token)
-        // } else {
-        //     None
-        // };
-        //
-        // if let Some(token) = eval.clone() {
-        //     tok.expect_token(&token)?;
-        // }
-        //
-        // let alias = Alias::parse(tok)?;
-        // let bounds = if tok.peek_token()?.tok == Token::Colon {
-        //     tok.expect_token(&Token::Colon);
-        //     todo!()
-        // } else {
-        //     None
-        // };
-        //
-        // tok.expect_token(&Token::Equal)?;
-        // let rhs = Expr::parse(tok)?;
-        //
-        // Ok(Self {
-        //     eval,
-        //     alias,
-        //     bounds,
-        //     rhs,
-        todo!()
-    }
-}
+        let eval = AliasEval::parse(tok)?;
+        let lhs = LhsExpr::parse(tok)?;
 
-impl AstNode for FnSignature {
-    fn parse(tok: &mut Tokenizer) -> ParseResult<Self> {
-        todo!()
+        let bounds = if tok.peek_token()?.tok == Token::Colon {
+            tok.expect_token(&Token::Colon)?;
+            Some(RhsExpr::parse(tok)?)
+        } else {
+            None
+        };
+
+        tok.expect_token(&Token::Equal)?;
+        let rhs = RhsExpr::parse(tok)?;
+        tok.expect_token(&Token::Semicolon)?;
+
+        Ok(Self {
+            eval,
+            lhs,
+            bounds,
+            rhs,
+        })
     }
 }
 
@@ -142,7 +132,17 @@ impl AstNode for IfaceDecl {
 
 impl AstNode for ModDecl {
     fn parse(tok: &mut Tokenizer) -> ParseResult<Self> {
-        todo!()
+        tok.expect_token(&Token::Mod)?;
+        let alias = Alias::parse(tok)?;
+        let scope = if tok.peek_token()?.tok == Token::RCurlyBrace {
+            tok.expect_token(&Token::RCurlyBrace)?;
+            Some(ConstScope::parse(tok)?)
+        } else {
+            tok.expect_token(&Token::Semicolon)?;
+            None
+        };
+
+        Ok(Self { alias, scope })
     }
 }
 
@@ -180,7 +180,9 @@ impl AstNode for Annotation {
 impl AstNode for Decl {
     fn parse(tok: &mut Tokenizer) -> ParseResult<Self> {
         Ok(match tok.peek_token()?.tok {
-            Token::Let => Self::Alias(AliasDecl::parse(tok)?),
+            Token::Let | Token::Mut | Token::Const | Token::Type => {
+                Self::Alias(AliasDecl::parse(tok)?)
+            }
             Token::Fn => Self::Fn(FnDecl::parse(tok)?),
             Token::Interface => Self::Interface(IfaceDecl::parse(tok)?),
             Token::Mod => Self::Mod(ModDecl::parse(tok)?),

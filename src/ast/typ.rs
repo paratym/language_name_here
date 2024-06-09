@@ -1,7 +1,9 @@
 use crate::{
-    ast::{Alias, AstNode, ParseResult, RhsExpr},
-    tokenizer::Tokenizer,
+    ast::{Alias, AstNode, ParseErr, ParseResult, RhsExpr},
+    tokenizer::{Token, Tokenizer},
 };
+
+use super::VisExpr;
 
 #[derive(Debug)]
 pub struct RefType {
@@ -16,20 +18,16 @@ pub struct ArrayType {
 }
 
 #[derive(Debug)]
-pub struct CompoundType {
-    pub fields: Vec<(Alias, RhsExpr)>,
-}
-
-#[derive(Debug)]
-pub struct StructFieldDef {
+pub struct FieldDef {
+    pub vis: Option<VisExpr>,
     pub alias: Alias,
     pub typ: RhsExpr,
     pub default: Option<RhsExpr>,
 }
 
 #[derive(Debug)]
-pub struct StructType {
-    pub fields: Vec<StructFieldDef>,
+pub struct CompoundType {
+    pub fields: Vec<FieldDef>,
 }
 
 #[derive(Debug)]
@@ -40,7 +38,16 @@ pub struct FnType {
 
 impl AstNode for RefType {
     fn parse(tok: &mut Tokenizer) -> ParseResult<Self> {
-        todo!()
+        tok.expect_token(&Token::Ampersand)?;
+        let mutable = tok.peek_token()?.tok == Token::Mut;
+        if mutable {
+            tok.expect_token(&Token::Mut)?;
+        }
+
+        Ok(Self {
+            mutable,
+            typ: RhsExpr::parse(tok)?,
+        })
     }
 }
 
@@ -50,15 +57,61 @@ impl AstNode for ArrayType {
     }
 }
 
-impl AstNode for CompoundType {
+impl AstNode for FieldDef {
     fn parse(tok: &mut Tokenizer) -> ParseResult<Self> {
-        todo!()
+        let vis = if tok.peek_token()?.tok == Token::Pub {
+            Some(VisExpr::parse(tok)?)
+        } else {
+            None
+        };
+
+        let alias = Alias::parse(tok)?;
+        tok.expect_token(&Token::Colon)?;
+        let typ = RhsExpr::parse(tok)?;
+
+        let default = if tok.peek_token()?.tok == Token::Equal {
+            tok.expect_token(&Token::Equal)?;
+            Some(RhsExpr::parse(tok)?)
+        } else {
+            None
+        };
+
+        Ok(Self {
+            vis,
+            alias,
+            typ,
+            default,
+        })
     }
 }
 
-impl AstNode for StructType {
+impl AstNode for CompoundType {
     fn parse(tok: &mut Tokenizer) -> ParseResult<Self> {
-        todo!()
+        tok.expect_token(&Token::LParen)?;
+        let mut typ = Self { fields: Vec::new() };
+
+        loop {
+            if tok.peek_token()?.tok == Token::Rparen {
+                return Ok(typ);
+            }
+
+            typ.fields.push(FieldDef::parse(tok)?);
+
+            match tok.peek_token()?.tok {
+                Token::Comma => tok.expect_token(&Token::Comma)?,
+                Token::Rparen => break,
+                _ => {
+                    let token = tok.next_token()?;
+                    return Err(ParseErr::Syntax {
+                        pos: token.pos,
+                        msg: "expected ',' or ')'",
+                    });
+                }
+            };
+        }
+
+        tok.expect_token(&Token::Rparen)?;
+        Ok(typ)
     }
 }
 

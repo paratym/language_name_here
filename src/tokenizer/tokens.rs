@@ -17,6 +17,8 @@ pub enum Token {
     Pub,
     Mod,
     Pkg,
+    Std,
+    Ext,
     Use,
     DoubleColon,
     Type,
@@ -102,6 +104,8 @@ lazy_static! {
         map.insert(Token::Pub, "pub");
         map.insert(Token::Mod, "mod");
         map.insert(Token::Pkg, "pkg");
+        map.insert(Token::Std, "std");
+        map.insert(Token::Ext, "ext");
         map.insert(Token::Use, "use");
         map.insert(Token::DoubleColon, "::");
         map.insert(Token::Type, "type");
