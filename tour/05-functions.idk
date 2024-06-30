@@ -1,0 +1,63 @@
+fn do_nothing {} # functions can be defined using the 'fn' keyword
+
+fn the_same_signature: () -> () {} # the signature can be passed explicitly
+# if it is omitted it is assumed to be '() -> ()'
+
+fn with_an_arg: i32::(arg_name) -> () { # all functions have exactly one argument, and one return type
+	# if no value is returned it is assumed to be '()'
+}
+
+fn compound_args: (a: i32, b: i32) -> i32 { # multiple args can be passed by using an inline struct
+	a.sum(b) # implicit return because there is no semicolon
+}
+
+fn multiple_returns: () -> (a: i32, b: i32) { # same for the return value
+	a = 0;
+	b = 0;
+	# implicit return if all return fields have been assigned
+}
+
+type Args = (a: i32, b: i32);
+fn named_args: Args::(a, b) -> () {}
+
+fn calling_rules {
+	do_nothing(); # functions can be called by passing the argument 
+	with_an_arg(0); # primitive arguments can be passed using parentheses
+	compound_args(a = 0, b = 0); # no extra parentheses are required for passing structs
+	named_args(a = 0, b = 0); # argument type can be inferred
+	named_args(Args::(a = 0, b = 0)); # the same as the previous call
+}
+
+### methods ###
+type Thingy = (a: i32);
+
+fn Thingy::new: i32::(a) -> Self { # 'Self' is the name given to the reciever type
+	Self::(.a) # private fields can only be accessed within methods
+}
+
+fn Thingy::into_secret: Self -> () -> i32 { # a method declaration on 'Thingy' that takes ownership of the reciever
+	self.a # 'self' is the default name given to the curried reciever argument
+}
+
+fn Thingy::leak_secret: &Self::(this) -> () -> i32 { # the reciever can be a reference to the self type and can be renamed
+	# self.a # error: self is never assigned
+	this.a.*
+}
+
+fn Thingy::do_nothing: i32::(arg) -> () { # the reciever cn be omitted entirely. this is just a scoped function
+	# self.leak_secret(); # error: self is never assigned
+}
+
+fn u8::negative: Self -> () -> u16 { # methods can be declared on arbitrary types, but must be explicitly imported
+	u16::(self).product(-1)
+}
+
+fn calling_methods {
+	let thingy = Thingy::new();
+	let secret1 = thingy.&.leak_secret(); # auto deref sounds hard
+	let secret2 = thingy.leak_secret();
+	Thingy::do_nothing(0);
+
+	let int: u8 = 255;
+	int.negative();
+}

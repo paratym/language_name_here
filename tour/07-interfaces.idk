@@ -1,0 +1,29 @@
+iface Math {
+	const ORIGIN: Self; # interfaces can include constants
+	type Rhs; # interfaces can include constants
+	type Result = Self; # items in interfaces can have defaults
+
+	fn add: Self -> Rhs -> Result; # interfaces can contain function signatures
+	fn default: () -> Self { # functions can be given default implementations
+		ORIGIN
+	}
+}
+
+# interfaces can be implemented inline by using the fully qualified path in the declarations
+const Math::<u8>::ORIGIN = 0;
+type Math::<u8>::Rhs = u8;
+fn Math::<u8>::add: Self -> Self::Rhs(rhs) -> Self::Result {
+	self.sum(rhs)
+}
+
+# impl blocks can be used to avoid repeating names
+impl Math::<u16> {
+	const ORIGIN = 0;
+	type Rhs = Self;
+
+	fn add: Self -> Rhs(rhs) -> Result {
+		self.sum(rhs)
+	}
+
+	fn default: () -> Self { 1 } # default implementations can be overridden
+}

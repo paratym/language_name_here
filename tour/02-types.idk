@@ -1,0 +1,15 @@
+### primitive types ###
+# iptr, uptr # platform dependent signed/unsigned integers
+# i8, i16, i24, i32, i64 # fixed size signed integers
+# u8, u16, u24, u32, u64 # fixed size unsigned integers
+# f32, f64 # floating point numbers
+# char # utf8 code point
+# str # fixed size utf8 string
+# bool # true/false
+
+type Num = i32;
+# const num: Num = 0; # error: expected value of type 'Num' found 'i32'
+const num: Num = Num::(0); # values can be explicitly cast
+const reverse_it: i32 = i32::(num);
+
+type NumRef = &Num;

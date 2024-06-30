@@ -1,0 +1,70 @@
+type Coords = (lat: f64, lng: f64);
+# fields in named structs are private by default
+# const coords = Coords::(lat = 0, lng = 0); # error: cannot construct a type with private fields
+
+type PubCoords = (pub lat: f64, pub lng: f64); # fields can be made public using the 'pub' keyword
+const coords = PubCoords::(lat = 0, lng = 0); # structs can be constructed by passing the fields using the '::' operator
+
+type PubishCoords = (pub:get lat: f64, pub:get lng: f64); # fields can be made read only using the 'get' modifier
+type PubestCoords = pub (lat: f64, lng: f64); # make all fields public
+
+type Origin = (lat: f64 = 0, lng: f64 = 0); # fields can be given default values
+# const origin = Origin::(lat = 5); # error: lat is a private field
+const origin = Origin::(); # types where all private fields have defaults can be constructed 
+
+fn casting_rules {
+	let inline_coords = (lat = f64(0), lng = f64(0)) # structs can be declared inline
+	let x = inline_coords.lng; # fields in inline structs are all public
+	# inline_coords.lng = x; # error: inline_coords is not declared as mutable
+
+	let vis_coords = PubCoords::(inline_coords); # structs with the same field names/types can be cast to/from one another
+	# let secret_coords = Coords::(inline_coords); # error: cannot cast to type with private fields
+	let leaked_documents = PubCoords::(origin); # the reverse is allowed
+}
+
+type Nested = pub (
+	elevation: f64,
+	coords: PubCoords,
+);
+
+type NestedInline = pub (
+	elevation: f64 = 0,
+	coords: ( # struct types can be declared inline
+		lat: f64 = 0, 
+		lng: f64 = 0 
+	) 
+)
+
+fn nested_constructors {
+	let nested = Nested::(
+		elevation = 0,
+		coords = (lat = 0, lng = 0) # nested type name can be inferred
+	);
+
+	let the_same_thing = Nested::(
+		elevation = 0,
+		coords.lat = 0, # nested fields can be assigned using the dot operator
+		coords.lng = 0,
+	);
+
+	let that_but_inline = NestedInline::(
+		elevation = 0,
+		# coords = (lat = 0, lng = 0), # error: lat and lng are private fields
+		# coords = () # this would work, but it can be omitted all together
+	);
+
+	let elevation = 0;
+	let lat = 0;
+	let that_but_shorter = Nested::(
+		.elevation, # variables with the same name as a field can be passed using the dot operator
+
+		### I dont know how to feel about these last two ###
+		.coords.lat, # it also works for nested structs
+		coords.lng = .coords.lat # a leading dot on the rhs refers to the current struct scope
+	);
+}
+
+### arrays ###
+const ints = [0, 1, 2, 3];
+const one = ints[1];
+type Array = i32[4];

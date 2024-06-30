@@ -1,9 +1,7 @@
 use crate::{
-    ast::{Alias, AstNode, ParseErr, ParseResult, RhsExpr},
+    ast::{Alias, AstNode, ParseErr, ParseResult, RhsExpr, VisExpr},
     tokenizer::{Token, Tokenizer},
 };
-
-use super::VisExpr;
 
 #[derive(Debug)]
 pub struct RefType {
