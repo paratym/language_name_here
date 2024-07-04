@@ -1,12 +1,12 @@
 use crate::{
-    ast::{AliasDecl, AstNode, ExecScope, LhsExpr, ParseErr, ParseResult, RhsExpr},
+    ast::{first_match, AliasDecl, AstNode, ExecScope, ParseErr, ParseResult, RhsExpr},
     tokenizer::{Token, Tokenizer},
 };
 use std::rc::Rc;
 
 #[derive(Debug)]
 pub struct AssignStmt {
-    pub lhs: LhsExpr,
+    pub lhs: RhsExpr,
     pub rhs: RhsExpr,
 }
 
@@ -37,11 +37,11 @@ pub struct WhileStmt {
     pub body: ExecScope,
 }
 
-#[derive(Debug)]
-pub struct MatchStmt {
-    pub val: RhsExpr,
-    pub branches: Vec<(LhsExpr, RhsExpr)>,
-}
+// #[derive(Debug)]
+// pub struct MatchStmt {
+//     pub val: RhsExpr,
+//     pub branches: Vec<(RhsExpr, RhsExpr)>,
+// }
 
 #[derive(Debug)]
 pub enum Stmt {
@@ -51,129 +51,166 @@ pub enum Stmt {
     Ctrl(CtrlStmt),
     If(IfStmt),
     While(WhileStmt),
-    Match(MatchStmt),
+    // Match(MatchStmt),
 }
 
 impl AstNode for AssignStmt {
-    fn parse(tok: &mut Tokenizer) -> ParseResult<Self> {
-        let lhs = LhsExpr::parse(tok)?;
-        tok.expect_token(&Token::Equal)?;
-        let rhs = RhsExpr::parse(tok)?;
+    fn parse(tok: &mut Tokenizer) -> ParseResult<Option<Self>> {
+        let lhs = if let Some(expr) = RhsExpr::parse(tok)? {
+            expr
+        } else {
+            return Ok(None);
+        };
 
-        Ok(Self { lhs, rhs })
+        tok.expect_token(&Token::Equal)?;
+        let rhs = RhsExpr::expect(tok)?;
+        tok.expect_token(&Token::Semicolon)?;
+
+        Ok(Some(Self { lhs, rhs }))
     }
 }
 
 impl AstNode for IfStmt {
-    fn parse(tok: &mut Tokenizer) -> ParseResult<Self> {
-        tok.expect_token(&Token::If)?;
-        let cond = RhsExpr::parse(tok)?;
-        let body = ExecScope::parse(tok)?;
-        let chain = if tok.peek_token()?.tok == Token::Else {
-            Some(ElseStmt::parse(tok)?)
+    fn parse(tok: &mut Tokenizer) -> ParseResult<Option<Self>> {
+        if tok.peek_token()?.tok == Token::If {
+            tok.expect_token(&Token::If)?;
         } else {
-            None
-        };
+            return Ok(None);
+        }
 
-        Ok(Self { cond, body, chain })
+        let cond = RhsExpr::expect(tok)?;
+        let body = ExecScope::expect(tok)?;
+        let chain = ElseStmt::parse(tok)?;
+
+        Ok(Some(Self { cond, body, chain }))
     }
 }
 
 impl AstNode for ElseStmt {
-    fn parse(tok: &mut Tokenizer) -> ParseResult<Self> {
-        tok.expect_token(&Token::Else)?;
-        match tok.peek_token()?.tok {
-            Token::If => Ok(Self::ElseIf(Rc::new(IfStmt::parse(tok)?))),
-            Token::RCurlyBrace => Ok(Self::Else(ExecScope::parse(tok)?)),
-            _ => {
-                let token = tok.next_token()?;
-                Err(ParseErr::Syntax {
-                    pos: token.pos,
-                    msg: "expected 'if' or '{'",
-                })
-            }
+    fn parse(tok: &mut Tokenizer) -> ParseResult<Option<Self>> {
+        if tok.peek_token()?.tok == Token::Else {
+            tok.expect_token(&Token::Else)?;
+        } else {
+            return Ok(None);
         }
+
+        Ok(Some(if let Some(cond) = IfStmt::parse(tok)? {
+            Self::ElseIf(cond.into())
+        } else if let Some(scope) = ExecScope::parse(tok)? {
+            Self::Else(scope)
+        } else {
+            return Err(ParseErr::Syntax {
+                pos: *tok.pos(),
+                msg: "expected an if statement or an execution scope",
+            });
+        }))
     }
 }
 
 impl AstNode for CtrlStmt {
-    fn parse(tok: &mut Tokenizer) -> ParseResult<Self> {
-        let token = tok.next_token()?;
-        let stmt = match token.tok {
-            Token::Continue => Self::Continue,
-            Token::Break => Self::Break,
-            Token::Defer => Self::Defer(RhsExpr::parse(tok)?),
-            Token::Return => Self::Return(RhsExpr::parse(tok)?),
-            _ => {
-                return Err(ParseErr::Syntax {
-                    pos: token.pos,
-                    msg: "expected 'continue', 'break', 'defer', or 'return'",
-                });
+    fn parse(tok: &mut Tokenizer) -> ParseResult<Option<Self>> {
+        let stmt = match tok.peek_token()?.tok {
+            Token::Continue => {
+                tok.expect_token(&Token::Continue)?;
+                Self::Continue
             }
+            Token::Break => {
+                tok.expect_token(&Token::Break)?;
+                Self::Break
+            }
+            Token::Defer => {
+                tok.expect_token(&Token::Defer)?;
+                Self::Defer(RhsExpr::expect(tok)?)
+            }
+            Token::Return => {
+                tok.expect_token(&Token::Return)?;
+                Self::Return(RhsExpr::expect(tok)?)
+            }
+            _ => return Ok(None),
         };
 
         tok.expect_token(&Token::Semicolon)?;
-        Ok(stmt)
+        Ok(Some(stmt))
     }
 }
 
 impl AstNode for WhileStmt {
-    fn parse(tok: &mut Tokenizer) -> ParseResult<Self> {
-        tok.expect_token(&Token::While)?;
-        Ok(Self {
-            cond: RhsExpr::parse(tok)?,
-            body: ExecScope::parse(tok)?,
-        })
-    }
-}
-
-impl AstNode for MatchStmt {
-    fn parse(tok: &mut Tokenizer) -> ParseResult<Self> {
-        tok.expect_token(&Token::Match)?;
-        let mut stmt = Self {
-            val: RhsExpr::parse(tok)?,
-            branches: Vec::new(),
-        };
-
-        tok.expect_token(&Token::LCurlyBrace)?;
-        loop {
-            if tok.peek_token()?.tok == Token::RCurlyBrace {
-                break;
-            }
-
-            let lhs = LhsExpr::parse(tok)?;
-            tok.expect_token(&Token::Arrow)?;
-            let rhs = RhsExpr::parse(tok)?;
-            stmt.branches.push((lhs, rhs));
-
-            let token = tok.peek_token()?;
-            match token.tok {
-                Token::RCurlyBrace => break,
-                Token::Comma => tok.expect_token(&Token::Comma)?,
-                _ => {
-                    return Err(ParseErr::Syntax {
-                        pos: token.pos,
-                        msg: "expected ',' or '}'",
-                    })
-                }
-            };
+    fn parse(tok: &mut Tokenizer) -> ParseResult<Option<Self>> {
+        if tok.peek_token()?.tok == Token::While {
+            tok.expect_token(&Token::While)?;
+        } else {
+            return Ok(None);
         }
 
-        tok.expect_token(&Token::RCurlyBrace)?;
-        Ok(stmt)
+        Ok(Some(Self {
+            cond: RhsExpr::expect(tok)?,
+            body: ExecScope::expect(tok)?,
+        }))
     }
 }
+
+// impl AstNode for MatchStmt {
+//     fn parse(tok: &mut Tokenizer) -> ParseResult<Option<Self>> {
+//         if tok.peek_token()?.tok == Token::Match {
+//             tok.expect_token(&Token::Match)?;
+//         } else {
+//             return Ok(None);
+//         }
+//
+//         let val = RhsExpr::expect(tok)?;
+//         tok.expect_token(&Token::LCurlyBrace)?;
+//
+//         let mut branches = Vec::new();
+//         loop {
+//             if tok.peek_token()?.tok == Token::RCurlyBrace {
+//                 break;
+//             }
+//
+//             let lhs = LhsExpr::expect(tok)?;
+//             tok.expect_token(&Token::Arrow)?;
+//             let rhs = RhsExpr::expect(tok)?;
+//             branches.push((lhs, rhs));
+//
+//             if tok.peek_token()?.tok == Token::RCurlyBrace {
+//                 break;
+//             } else {
+//                 tok.expect_token(&Token::Comma)
+//             };
+//         }
+//
+//         tok.expect_token(&Token::RCurlyBrace)?;
+//         Ok(Some(Self { val, branches }))
+//     }
+// }
 
 impl AstNode for Stmt {
-    fn parse(tok: &mut Tokenizer) -> ParseResult<Self> {
-        match tok.peek_token()?.tok {
-            Token::If => Ok(Self::If(IfStmt::parse(tok)?)),
-            Token::Continue | Token::Break | Token::Defer | Token::Return => {
-                Ok(Self::Ctrl(CtrlStmt::parse(tok)?))
-            }
-            Token::While => Ok(Self::While(WhileStmt::parse(tok)?)),
-            Token::Match => Ok(Self::Match(MatchStmt::parse(tok)?)),
-            _ => todo!(),
-        }
+    fn parse(tok: &mut Tokenizer) -> ParseResult<Option<Self>> {
+        Ok(first_match!(
+            tok, Self, AssignStmt, CtrlStmt, IfStmt, WhileStmt
+        ))
+    }
+}
+
+impl From<AssignStmt> for Stmt {
+    fn from(value: AssignStmt) -> Self {
+        Self::Assign(value)
+    }
+}
+
+impl From<CtrlStmt> for Stmt {
+    fn from(value: CtrlStmt) -> Self {
+        Self::Ctrl(value)
+    }
+}
+
+impl From<IfStmt> for Stmt {
+    fn from(value: IfStmt) -> Self {
+        Self::If(value)
+    }
+}
+
+impl From<WhileStmt> for Stmt {
+    fn from(value: WhileStmt) -> Self {
+        Self::While(value)
     }
 }

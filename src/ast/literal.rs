@@ -1,8 +1,13 @@
 use crate::{
-    ast::{AstNode, LhsExpr, ParseErr, ParseResult, RhsExpr},
-    tokenizer::{SrcToken, Token, Tokenizer},
+    ast::{AstNode, ParseErr, ParseResult, RhsExpr},
+    tokenizer::{Token, Tokenizer},
 };
 use std::rc::Rc;
+
+#[derive(Debug)]
+pub struct BoolLit {
+    pub val: bool,
+}
 
 #[derive(Debug)]
 pub struct NumLit {
@@ -23,24 +28,31 @@ pub struct StrLit {
 
 #[derive(Debug)]
 pub struct ArrayLit {
-    pub entries: Vec<RhsExpr>,
+    pub fields: Vec<RhsExpr>,
 }
 
-#[derive(Debug)]
-pub struct CompoundLit {
-    pub fields: Vec<(LhsExpr, RhsExpr)>,
+impl AstNode for BoolLit {
+    fn parse(tok: &mut Tokenizer) -> ParseResult<Option<Self>> {
+        let val = match tok.peek_token()?.tok {
+            Token::True => true,
+            Token::False => false,
+            _ => return Ok(None),
+        };
+
+        tok.next_token()?;
+        Ok(Some(Self { val }))
+    }
 }
 
 impl AstNode for NumLit {
-    fn parse(tok: &mut Tokenizer) -> ParseResult<Self> {
-        let token = tok.next_token()?;
-        let lit = if let Token::NumLit(num) = token.tok {
+    fn parse(tok: &mut Tokenizer) -> ParseResult<Option<Self>> {
+        let token = tok.peek_token()?;
+        let lit = if let Token::NumLit(num_ref) = &token.tok {
+            let num = num_ref.clone();
+            tok.next_token()?;
             num
         } else {
-            return Err(ParseErr::Syntax {
-                pos: token.pos,
-                msg: "expected number literal",
-            });
+            return Ok(None);
         };
 
         todo!()
@@ -48,15 +60,14 @@ impl AstNode for NumLit {
 }
 
 impl AstNode for CharLit {
-    fn parse(tok: &mut Tokenizer) -> ParseResult<Self> {
-        let token = tok.next_token()?;
-        let lit = if let Token::CharLit(chr) = token.tok {
+    fn parse(tok: &mut Tokenizer) -> ParseResult<Option<Self>> {
+        let token = tok.peek_token()?;
+        let lit = if let Token::CharLit(chr_ref) = &token.tok {
+            let chr = chr_ref.clone();
+            tok.next_token()?;
             chr
         } else {
-            return Err(ParseErr::Syntax {
-                pos: token.pos,
-                msg: "expected character literal",
-            });
+            return Ok(None);
         };
 
         todo!()
@@ -64,15 +75,14 @@ impl AstNode for CharLit {
 }
 
 impl AstNode for StrLit {
-    fn parse(tok: &mut Tokenizer) -> ParseResult<Self> {
-        let token = tok.next_token()?;
-        let lit = if let Token::StrLit(str) = token.tok {
-            str
+    fn parse(tok: &mut Tokenizer) -> ParseResult<Option<Self>> {
+        let token = tok.peek_token()?;
+        let lit = if let Token::StrLit(str_ref) = &token.tok {
+            let string = str_ref.clone();
+            tok.next_token()?;
+            string
         } else {
-            return Err(ParseErr::Syntax {
-                pos: token.pos,
-                msg: "expected string literal",
-            });
+            return Ok(None);
         };
 
         todo!()
@@ -80,18 +90,20 @@ impl AstNode for StrLit {
 }
 
 impl AstNode for ArrayLit {
-    fn parse(tok: &mut Tokenizer) -> ParseResult<Self> {
-        tok.expect_token(&Token::LSqrBrace)?;
-        let mut lit = Self {
-            entries: Vec::new(),
-        };
+    fn parse(tok: &mut Tokenizer) -> ParseResult<Option<Self>> {
+        if tok.peek_token()?.tok != Token::LSqrBrace {
+            return Ok(None);
+        }
 
+        tok.expect_token(&Token::LSqrBrace)?;
+
+        let mut fields = Vec::new();
         loop {
             if tok.peek_token()?.tok == Token::RSqrBrace {
-                return Ok(lit);
+                break;
             }
 
-            lit.entries.push(RhsExpr::parse(tok)?);
+            fields.push(RhsExpr::expect(tok)?);
 
             match tok.peek_token()?.tok {
                 Token::RSqrBrace => break,
@@ -107,39 +119,6 @@ impl AstNode for ArrayLit {
         }
 
         tok.expect_token(&Token::RSqrBrace)?;
-        Ok(lit)
-    }
-}
-
-impl AstNode for CompoundLit {
-    fn parse(tok: &mut Tokenizer) -> ParseResult<Self> {
-        tok.expect_token(&Token::LParen)?;
-        let mut lit = Self { fields: Vec::new() };
-
-        loop {
-            if tok.peek_token()?.tok == Token::Rparen {
-                break;
-            }
-
-            let field = LhsExpr::parse(tok)?;
-            tok.expect_token(&Token::Equal)?;
-            let value = RhsExpr::parse(tok)?;
-            lit.fields.push((field, value));
-
-            match tok.peek_token()?.tok {
-                Token::Rparen => break,
-                Token::Comma => tok.expect_token(&Token::Comma)?,
-                _ => {
-                    let token = tok.next_token()?;
-                    return Err(ParseErr::Syntax {
-                        pos: token.pos,
-                        msg: "expected ',' or ')'",
-                    });
-                }
-            };
-        }
-
-        tok.expect_token(&Token::Rparen)?;
-        Ok(lit)
+        Ok(Some(Self { fields }))
     }
 }

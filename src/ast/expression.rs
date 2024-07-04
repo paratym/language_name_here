@@ -1,282 +1,191 @@
 use crate::{
     ast::{
-        ArrayLit, ArrayType, AstNode, CharLit, CompoundLit, CompoundType, ExecScope, FnType,
-        NumLit, ParseErr, ParseResult, RefType, StrLit,
+        first_match, first_match_chain, Alias, ArrayLit, ArrayType, AstNode, BoolLit, CallExpr,
+        CharLit, DestructureExpr, EvalPath, ExecPath, ExecScope, FnType, NumLit, ParseResult,
+        PrimitiveType, RefType, StrLit, StructDef,
     },
-    tokenizer::{Token, Tokenizer},
+    tokenizer::Tokenizer,
 };
 use std::rc::Rc;
 
 #[derive(Debug)]
-pub enum VisScope {
-    Pkg,
-    Mod,
-}
-
-#[derive(Debug)]
-pub enum Access {
-    Get,
-    Set,
-}
-
-#[derive(Debug)]
-pub struct VisExpr {
-    pub vis: Option<VisScope>,
-    pub access: Option<Access>,
-}
-
-#[derive(Debug)]
-pub struct Alias {
-    pub alias: Rc<str>,
-}
-
-#[derive(Debug)]
-pub enum ScopeAlias {
-    Pkg,
-    Std,
-    Ext,
-    Local(RhsExpr),
-}
-
-#[derive(Debug)]
-pub struct PathExpr {
-    pub scope: ScopeAlias,
-    pub path: Vec<Alias>,
-}
-
-#[derive(Debug)]
-pub enum Arg {
-    Expr(RhsExpr),
-    Compound(CompoundLit),
-}
-
-#[derive(Debug)]
-pub enum DotExpr {
-    Ref,
-    RefMut,
-    Deref,
-    Field(Alias),
-    Index(RhsExpr),
-    Call(Arg),
-}
-
-#[derive(Debug)]
-pub struct ConstructExpr {
-    pub typ: RhsExpr,
-    pub arg: Arg,
-}
-
-#[derive(Debug)]
-pub struct SpreadExpr {
-    pub val: RhsExpr,
-}
-
-#[derive(Debug)]
-pub struct DestructureExpr {
-    pub fields: Vec<LhsExpr>,
-}
-
-#[derive(Debug)]
 pub enum RhsExpr {
-    Alias(Alias),
-    Construct(Rc<ConstructExpr>),
-    Dot(Rc<DotExpr>),
     Scope(ExecScope),
+    Alias(Alias),
+    Destructure(DestructureExpr),
+    EvalPath {
+        rcv: Rc<RhsExpr>,
+        path: Rc<EvalPath>,
+    },
+    ExecPath {
+        rcv: Rc<RhsExpr>,
+        path: ExecPath,
+    },
+    Call {
+        rcv: Rc<RhsExpr>,
+        arg: CallExpr,
+    },
 
+    BoolLit(BoolLit),
     NumLit(NumLit),
     CharLit(CharLit),
     StrLit(StrLit),
     ArrayLit(ArrayLit),
-    CompoundLit(CompoundLit),
 
+    PrimitiveType(PrimitiveType),
     RefType(Rc<RefType>),
-    ArrayType(Rc<ArrayType>),
-    CompoundType(CompoundType),
-    FnType(Rc<FnType>),
-}
-
-#[derive(Debug)]
-pub enum LhsExpr {
-    Alias(Alias),
-    Dot(DotExpr),
-    Destructure(DestructureExpr),
-}
-
-impl AstNode for VisScope {
-    fn parse(tok: &mut Tokenizer) -> ParseResult<Self> {
-        let token = tok.next_token()?;
-        match token.tok {
-            Token::Pkg => Ok(Self::Pkg),
-            Token::Mod => Ok(Self::Mod),
-            _ => Err(ParseErr::Syntax {
-                pos: token.pos,
-                msg: "expected 'pkg' or 'mod'",
-            }),
-        }
-    }
-}
-
-impl AstNode for Access {
-    fn parse(tok: &mut Tokenizer) -> ParseResult<Self> {
-        let token = tok.next_token()?;
-        match token.tok {
-            Token::Get => Ok(Self::Get),
-            Token::Set => Ok(Self::Set),
-            _ => Err(ParseErr::Syntax {
-                pos: token.pos,
-                msg: "expected 'get' or 'set'",
-            }),
-        }
-    }
-}
-
-impl AstNode for VisExpr {
-    fn parse(tok: &mut Tokenizer) -> ParseResult<Self> {
-        tok.expect_token(&Token::Pub)?;
-        let mut expr = Self {
-            vis: None,
-            access: None,
-        };
-
-        loop {
-            if tok.peek_token()?.tok != Token::Colon {
-                return Ok(expr);
-            }
-
-            tok.expect_token(&Token::Colon)?;
-            let token = tok.next_token()?;
-            match token.tok {
-                Token::Pkg | Token::Mod if expr.vis.is_none() => {
-                    expr.vis = Some(VisScope::parse(tok)?)
-                }
-                Token::Get | Token::Set if expr.access.is_none() => {
-                    expr.access = Some(Access::parse(tok)?)
-                }
-                _ => {
-                    return Err(ParseErr::Syntax {
-                        pos: token.pos,
-                        msg: "expected unique 'pkg', 'mod', 'get', or 'set'",
-                    })
-                }
-            };
-        }
-    }
-}
-
-impl AstNode for Alias {
-    fn parse(tok: &mut Tokenizer) -> ParseResult<Self> {
-        let token = tok.next_token()?;
-        let alias = match token.tok {
-            Token::Alias(str) => str.into(),
-            _ => {
-                return Err(ParseErr::Syntax {
-                    pos: token.pos,
-                    msg: "expected an alias",
-                })
-            }
-        };
-
-        Ok(Self { alias })
-    }
-}
-
-impl AstNode for ScopeAlias {
-    fn parse(tok: &mut Tokenizer) -> ParseResult<Self> {
-        let scope = match tok.peek_token()?.tok {
-            Token::Pkg => Self::Pkg,
-            Token::Std => Self::Std,
-            Token::Ext => Self::Ext,
-            _ => return Ok(Self::Local(RhsExpr::parse(tok)?)),
-        };
-
-        tok.next_token()?;
-        Ok(scope)
-    }
-}
-
-impl AstNode for PathExpr {
-    fn parse(tok: &mut Tokenizer) -> ParseResult<Self> {
-        let scope = ScopeAlias::parse(tok)?;
-        let mut path = Vec::new();
-
-        loop {
-            if tok.peek_token()?.tok == Token::DoubleColon {
-                break;
-            }
-
-            path.push(Alias::parse(tok)?);
-        }
-
-        Ok(Self { scope, path })
-    }
-}
-
-impl AstNode for Arg {
-    fn parse(tok: &mut Tokenizer) -> ParseResult<Self> {
-        todo!()
-    }
-}
-
-impl AstNode for DotExpr {
-    fn parse(tok: &mut Tokenizer) -> ParseResult<Self> {
-        todo!()
-    }
-}
-
-impl AstNode for ConstructExpr {
-    fn parse(tok: &mut Tokenizer) -> ParseResult<Self> {
-        todo!()
-    }
-}
-
-impl AstNode for SpreadExpr {
-    fn parse(tok: &mut Tokenizer) -> ParseResult<Self> {
-        tok.expect_token(&Token::Elipsis)?;
-
-        Ok(Self {
-            val: RhsExpr::parse(tok)?,
-        })
-    }
-}
-
-impl AstNode for DestructureExpr {
-    fn parse(tok: &mut Tokenizer) -> ParseResult<Self> {
-        tok.expect_token(&Token::LParen)?;
-        let mut expr = Self { fields: Vec::new() };
-
-        loop {
-            if tok.peek_token()?.tok == Token::Rparen {
-                break;
-            }
-
-            expr.fields.push(LhsExpr::parse(tok)?);
-
-            let token = tok.peek_token()?;
-            match token.tok {
-                Token::Rparen => break,
-                Token::Comma => tok.expect_token(&Token::Comma)?,
-                _ => {
-                    return Err(ParseErr::Syntax {
-                        pos: token.pos,
-                        msg: "expected ',' or ')'",
-                    })
-                }
-            };
-        }
-
-        tok.expect_token(&Token::Rparen)?;
-        Ok(expr)
-    }
+    Struct(StructDef),
+    ArrayType {
+        typ: Rc<RhsExpr>,
+        len: Rc<ArrayType>,
+    },
+    FnType {
+        arg: Rc<RhsExpr>,
+        ret: Rc<FnType>,
+    },
 }
 
 impl AstNode for RhsExpr {
-    fn parse(tok: &mut Tokenizer) -> ParseResult<Self> {
-        todo!()
+    fn parse(tok: &mut Tokenizer) -> ParseResult<Option<Self>> {
+        let base = first_match!(
+            tok,
+            Self,
+            ExecScope,
+            Alias,
+            DestructureExpr,
+            BoolLit,
+            NumLit,
+            CharLit,
+            StrLit,
+            ArrayLit,
+            PrimitiveType,
+            RefType,
+            StructDef
+        );
+
+        let mut expr = if let Some(expr) = base {
+            expr
+        } else {
+            return Ok(None);
+        };
+
+        loop {
+            match first_match_chain!(
+                tok, Self, expr, EvalPath, ExecPath, ArrayType, CallExpr, FnType
+            ) {
+                (true, chain) => expr = chain,
+                (false, chain) => break Ok(Some(chain)),
+            }
+        }
     }
 }
 
-impl AstNode for LhsExpr {
-    fn parse(tok: &mut Tokenizer) -> ParseResult<Self> {
-        todo!()
+impl From<ExecScope> for RhsExpr {
+    fn from(value: ExecScope) -> Self {
+        Self::Scope(value)
+    }
+}
+
+impl From<Alias> for RhsExpr {
+    fn from(value: Alias) -> Self {
+        Self::Alias(value)
+    }
+}
+
+impl From<DestructureExpr> for RhsExpr {
+    fn from(value: DestructureExpr) -> Self {
+        Self::Destructure(value)
+    }
+}
+
+impl From<(Self, EvalPath)> for RhsExpr {
+    fn from(value: (Self, EvalPath)) -> Self {
+        Self::EvalPath {
+            rcv: value.0.into(),
+            path: value.1.into(),
+        }
+    }
+}
+
+impl From<(Self, ExecPath)> for RhsExpr {
+    fn from(value: (Self, ExecPath)) -> Self {
+        Self::ExecPath {
+            rcv: value.0.into(),
+            path: value.1,
+        }
+    }
+}
+impl From<(Self, CallExpr)> for RhsExpr {
+    fn from(value: (Self, CallExpr)) -> Self {
+        Self::Call {
+            rcv: value.0.into(),
+            arg: value.1,
+        }
+    }
+}
+
+impl From<BoolLit> for RhsExpr {
+    fn from(value: BoolLit) -> Self {
+        Self::BoolLit(value)
+    }
+}
+
+impl From<NumLit> for RhsExpr {
+    fn from(value: NumLit) -> Self {
+        Self::NumLit(value)
+    }
+}
+
+impl From<CharLit> for RhsExpr {
+    fn from(value: CharLit) -> Self {
+        Self::CharLit(value)
+    }
+}
+
+impl From<StrLit> for RhsExpr {
+    fn from(value: StrLit) -> Self {
+        Self::StrLit(value)
+    }
+}
+
+impl From<ArrayLit> for RhsExpr {
+    fn from(value: ArrayLit) -> Self {
+        Self::ArrayLit(value)
+    }
+}
+
+impl From<PrimitiveType> for RhsExpr {
+    fn from(value: PrimitiveType) -> Self {
+        Self::PrimitiveType(value)
+    }
+}
+
+impl From<RefType> for RhsExpr {
+    fn from(value: RefType) -> Self {
+        Self::RefType(value.into())
+    }
+}
+
+impl From<StructDef> for RhsExpr {
+    fn from(value: StructDef) -> Self {
+        Self::Struct(value)
+    }
+}
+
+impl From<(Self, ArrayType)> for RhsExpr {
+    fn from(value: (Self, ArrayType)) -> Self {
+        Self::ArrayType {
+            typ: value.0.into(),
+            len: value.1.into(),
+        }
+    }
+}
+
+impl From<(Self, FnType)> for RhsExpr {
+    fn from(value: (Self, FnType)) -> Self {
+        Self::FnType {
+            arg: value.0.into(),
+            ret: value.1.into(),
+        }
     }
 }

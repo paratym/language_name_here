@@ -1,24 +1,26 @@
 use bimap::BiMap;
 use lazy_static::lazy_static;
-use std::fmt::{self, Display};
+use std::{
+    fmt::{self, Display},
+    sync::Arc,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Token {
-    Comment(Box<str>),
-    Alias(Box<str>),
+    Comment(Arc<str>),
+    Alias(Arc<str>),
     Equal,
     As,
     Let,
-    Mut,
+    Var,
     Const,
-    Lazy,
     Asterisk,
     Ampersand,
+    Caret,
     Pub,
     Mod,
     Pkg,
     Std,
-    Ext,
     Use,
     DoubleColon,
     Type,
@@ -27,9 +29,9 @@ pub enum Token {
     True,
     False,
     Char,
-    CharLit(Box<str>),
+    CharLit(Arc<str>),
     Str,
-    StrLit(Box<str>),
+    StrLit(Arc<str>),
     Isize,
     I8,
     I16,
@@ -44,7 +46,7 @@ pub enum Token {
     U64,
     F32,
     F64,
-    NumLit(Box<str>),
+    NumLit(Arc<str>),
     LParen,
     Rparen,
     Colon,
@@ -71,7 +73,7 @@ pub enum Token {
     Break,
     Continue,
     Match,
-    Interface,
+    Iface,
     Impl,
     Bang,
     LAngleBrace,
@@ -96,16 +98,15 @@ lazy_static! {
         map.insert(Token::Equal, "=");
         map.insert(Token::As, "as");
         map.insert(Token::Let, "let");
-        map.insert(Token::Mut, "mut");
+        map.insert(Token::Var, "var");
         map.insert(Token::Const, "const");
-        map.insert(Token::Lazy, "lazy");
         map.insert(Token::Asterisk, "*");
         map.insert(Token::Ampersand, "&");
+        map.insert(Token::Caret, "^");
         map.insert(Token::Pub, "pub");
         map.insert(Token::Mod, "mod");
         map.insert(Token::Pkg, "pkg");
         map.insert(Token::Std, "std");
-        map.insert(Token::Ext, "ext");
         map.insert(Token::Use, "use");
         map.insert(Token::DoubleColon, "::");
         map.insert(Token::Type, "type");
@@ -154,7 +155,7 @@ lazy_static! {
         map.insert(Token::Break, "break");
         map.insert(Token::Continue, "continue");
         map.insert(Token::Match, "match");
-        map.insert(Token::Interface, "interface");
+        map.insert(Token::Iface, "interface");
         map.insert(Token::Impl, "impl");
         map.insert(Token::Bang, "!");
         map.insert(Token::LAngleBrace, "<");
