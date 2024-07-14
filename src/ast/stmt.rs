@@ -1,18 +1,32 @@
 use crate::{
-    ast::{first_match, AliasDecl, AstNode, ExecScope, ParseErr, ParseResult, RhsExpr},
-    tokenizer::{Token, Tokenizer},
+    ast::{first_match, AliasDecl, AstNode, ExecScope, Expr, ParseErr, ParseResult, UseDecl},
+    tok::{Token, Tokenizer},
 };
-use std::rc::Rc;
+use std::{io::BufRead, rc::Rc};
 
 #[derive(Debug)]
 pub struct AssignStmt {
-    pub lhs: RhsExpr,
-    pub rhs: RhsExpr,
+    pub lhs: Expr,
+    pub rhs: Expr,
+}
+
+#[derive(Debug)]
+pub enum UnaryOp {
+    Return,
+    Defer,
+    Continue,
+    Break,
+}
+
+#[derive(Debug)]
+pub struct UnaryStmt {
+    pub op: UnaryOp,
+    pub rhs: Expr,
 }
 
 #[derive(Debug)]
 pub struct IfStmt {
-    pub cond: RhsExpr,
+    pub cond: Expr,
     pub body: ExecScope,
     pub chain: Option<ElseStmt>,
 }
@@ -24,16 +38,8 @@ pub enum ElseStmt {
 }
 
 #[derive(Debug)]
-pub enum CtrlStmt {
-    Continue,
-    Break,
-    Defer(RhsExpr),
-    Return(RhsExpr),
-}
-
-#[derive(Debug)]
 pub struct WhileStmt {
-    pub cond: RhsExpr,
+    pub cond: Expr,
     pub body: ExecScope,
 }
 
@@ -46,39 +52,67 @@ pub struct WhileStmt {
 #[derive(Debug)]
 pub enum Stmt {
     AliasDecl(AliasDecl),
+    UseDecl(UseDecl),
     Assign(AssignStmt),
-    Expr(RhsExpr),
-    Ctrl(CtrlStmt),
+    Unary(UnaryStmt),
+    Expr(Expr),
     If(IfStmt),
     While(WhileStmt),
     // Match(MatchStmt),
 }
 
 impl AstNode for AssignStmt {
-    fn parse(tok: &mut Tokenizer) -> ParseResult<Option<Self>> {
-        let lhs = if let Some(expr) = RhsExpr::parse(tok)? {
+    fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
+        let lhs = if let Some(expr) = Expr::parse(tok)? {
             expr
         } else {
             return Ok(None);
         };
 
         tok.expect_token(&Token::Equal)?;
-        let rhs = RhsExpr::expect(tok)?;
+        let rhs = Expr::expect(tok)?;
         tok.expect_token(&Token::Semicolon)?;
 
         Ok(Some(Self { lhs, rhs }))
     }
 }
 
+impl AstNode for UnaryOp {
+    fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
+        Ok(Some(match tok.peek_token()?.tok {
+            Token::Return => Self::Return,
+            Token::Defer => Self::Defer,
+            Token::Continue => Self::Continue,
+            Token::Break => Self::Break,
+            _ => return Ok(None),
+        }))
+    }
+}
+
+impl AstNode for UnaryStmt {
+    fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
+        let op = if let Some(op) = UnaryOp::parse(tok)? {
+            op
+        } else {
+            return Ok(None);
+        };
+
+        let rhs = Expr::expect(tok)?;
+        tok.expect_token(&Token::Semicolon)?;
+
+        Ok(Some(Self { op, rhs }))
+    }
+}
+
 impl AstNode for IfStmt {
-    fn parse(tok: &mut Tokenizer) -> ParseResult<Option<Self>> {
+    fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
         if tok.peek_token()?.tok == Token::If {
             tok.expect_token(&Token::If)?;
         } else {
             return Ok(None);
         }
 
-        let cond = RhsExpr::expect(tok)?;
+        let cond = Expr::expect(tok)?;
         let body = ExecScope::expect(tok)?;
         let chain = ElseStmt::parse(tok)?;
 
@@ -87,7 +121,7 @@ impl AstNode for IfStmt {
 }
 
 impl AstNode for ElseStmt {
-    fn parse(tok: &mut Tokenizer) -> ParseResult<Option<Self>> {
+    fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
         if tok.peek_token()?.tok == Token::Else {
             tok.expect_token(&Token::Else)?;
         } else {
@@ -101,41 +135,14 @@ impl AstNode for ElseStmt {
         } else {
             return Err(ParseErr::Syntax {
                 pos: *tok.pos(),
-                msg: "expected an if statement or an execution scope",
+                msg: "expected an if statement or an execution scope".into(),
             });
         }))
     }
 }
 
-impl AstNode for CtrlStmt {
-    fn parse(tok: &mut Tokenizer) -> ParseResult<Option<Self>> {
-        let stmt = match tok.peek_token()?.tok {
-            Token::Continue => {
-                tok.expect_token(&Token::Continue)?;
-                Self::Continue
-            }
-            Token::Break => {
-                tok.expect_token(&Token::Break)?;
-                Self::Break
-            }
-            Token::Defer => {
-                tok.expect_token(&Token::Defer)?;
-                Self::Defer(RhsExpr::expect(tok)?)
-            }
-            Token::Return => {
-                tok.expect_token(&Token::Return)?;
-                Self::Return(RhsExpr::expect(tok)?)
-            }
-            _ => return Ok(None),
-        };
-
-        tok.expect_token(&Token::Semicolon)?;
-        Ok(Some(stmt))
-    }
-}
-
 impl AstNode for WhileStmt {
-    fn parse(tok: &mut Tokenizer) -> ParseResult<Option<Self>> {
+    fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
         if tok.peek_token()?.tok == Token::While {
             tok.expect_token(&Token::While)?;
         } else {
@@ -143,7 +150,7 @@ impl AstNode for WhileStmt {
         }
 
         Ok(Some(Self {
-            cond: RhsExpr::expect(tok)?,
+            cond: Expr::expect(tok)?,
             body: ExecScope::expect(tok)?,
         }))
     }
@@ -184,9 +191,9 @@ impl AstNode for WhileStmt {
 // }
 
 impl AstNode for Stmt {
-    fn parse(tok: &mut Tokenizer) -> ParseResult<Option<Self>> {
+    fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
         Ok(first_match!(
-            tok, Self, AssignStmt, CtrlStmt, IfStmt, WhileStmt
+            tok, Self, UnaryStmt, IfStmt, WhileStmt, AssignStmt
         ))
     }
 }
@@ -197,9 +204,9 @@ impl From<AssignStmt> for Stmt {
     }
 }
 
-impl From<CtrlStmt> for Stmt {
-    fn from(value: CtrlStmt) -> Self {
-        Self::Ctrl(value)
+impl From<UnaryStmt> for Stmt {
+    fn from(value: UnaryStmt) -> Self {
+        Self::Unary(value)
     }
 }
 

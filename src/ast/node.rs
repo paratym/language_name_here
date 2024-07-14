@@ -1,15 +1,17 @@
+use std::{any::type_name, io::BufRead};
+
 use crate::{
     ast::{ParseErr, ParseResult},
-    tokenizer::Tokenizer,
+    tok::Tokenizer,
 };
 
 pub trait AstNode: Sized {
-    fn parse(tok: &mut Tokenizer) -> ParseResult<Option<Self>>;
+    fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>>;
 
-    fn expect(tok: &mut Tokenizer) -> ParseResult<Self> {
+    fn expect(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Self> {
         Self::parse(tok)?.ok_or(ParseErr::Syntax {
             pos: *tok.pos(),
-            msg: "unexpected node",
+            msg: format!("expected {}", type_name::<Self>()),
         })
     }
 }

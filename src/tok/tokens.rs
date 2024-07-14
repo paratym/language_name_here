@@ -2,6 +2,7 @@ use bimap::BiMap;
 use lazy_static::lazy_static;
 use std::{
     fmt::{self, Display},
+    ops::Add,
     sync::Arc,
 };
 
@@ -21,6 +22,7 @@ pub enum Token {
     Mod,
     Pkg,
     Std,
+    Ext,
     Use,
     DoubleColon,
     Type,
@@ -56,7 +58,6 @@ pub enum Token {
     Underscore,
     Get,
     Set,
-    Union,
     LSqrBrace,
     RSqrBrace,
     Elipsis,
@@ -73,6 +74,7 @@ pub enum Token {
     Break,
     Continue,
     Match,
+    Enum,
     Iface,
     Impl,
     Bang,
@@ -107,6 +109,7 @@ lazy_static! {
         map.insert(Token::Mod, "mod");
         map.insert(Token::Pkg, "pkg");
         map.insert(Token::Std, "std");
+        map.insert(Token::Ext, "ext");
         map.insert(Token::Use, "use");
         map.insert(Token::DoubleColon, "::");
         map.insert(Token::Type, "type");
@@ -138,7 +141,6 @@ lazy_static! {
         map.insert(Token::Underscore, "_");
         map.insert(Token::Get, "get");
         map.insert(Token::Set, "set");
-        map.insert(Token::Union, "union");
         map.insert(Token::LSqrBrace, "[");
         map.insert(Token::RSqrBrace, "]");
         map.insert(Token::Elipsis, "...");
@@ -155,6 +157,7 @@ lazy_static! {
         map.insert(Token::Break, "break");
         map.insert(Token::Continue, "continue");
         map.insert(Token::Match, "match");
+        map.insert(Token::Enum, "enum");
         map.insert(Token::Iface, "interface");
         map.insert(Token::Impl, "impl");
         map.insert(Token::Bang, "!");
@@ -169,11 +172,11 @@ lazy_static! {
 impl Display for Token {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Comment(val)
-            | Self::Alias(val)
-            | Self::CharLit(val)
-            | Self::StrLit(val)
-            | Self::NumLit(val) => f.write_str(val),
+            Self::Comment(val) => write!(f, "# {}", val),
+            Self::Alias(val) => f.write_str(val),
+            Self::CharLit(val) => write!(f, "'{}'", val),
+            Self::StrLit(val) => write!(f, "\"{}\"", val),
+            Self::NumLit(val) => f.write_str(val),
             _ => f.write_str(LEX_TOKENS.get_by_left(self).ok_or(fmt::Error)?),
         }
     }

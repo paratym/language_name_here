@@ -11,10 +11,11 @@
           inherit system;
           overlays = [ (import rust-overlay) ];
         };
-      in {
+      in
+      {
         devShells.default = pkgs.mkShell (with pkgs; {
           packages =
-            [ rust-bin.stable.latest.default rust-analyzer pkg-config ];
+            [ rust-bin.stable.latest.default pkg-config ];
         });
       });
 }

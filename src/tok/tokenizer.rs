@@ -1,16 +1,16 @@
-use crate::tokenizer::*;
+use crate::tok::*;
 use std::io::BufRead;
 
-pub struct Tokenizer {
-    reader: Box<dyn BufRead>,
+pub struct Tokenizer<R: BufRead> {
+    reader: R,
     pos: SrcPosition,
     cached: Option<SrcToken>,
 }
 
 const NULL_CH: char = 0 as char;
 
-impl Tokenizer {
-    pub fn new(reader: Box<dyn BufRead>) -> Self {
+impl<R: BufRead> Tokenizer<R> {
+    pub fn new(reader: R) -> Self {
         Self {
             reader,
             pos: SrcPosition { line: 0, column: 0 },
@@ -29,7 +29,7 @@ impl Tokenizer {
                     if end_i == 0 {
                         return Err(TokErr::Syntax {
                             pos: self.pos,
-                            msg: "invalid utf8 character",
+                            msg: "invalid utf8 character".into(),
                         });
                     }
                 }
@@ -46,13 +46,8 @@ impl Tokenizer {
             return Ok(tok);
         }
 
-        self.cached = match self.next_token() {
-            Ok(tok) => Some(tok),
-            Err(TokErr::ReaderEmpty) => None,
-            Err(e) => return Err(e),
-        };
-
-        return Ok(self.cached.as_ref().unwrap());
+        self.cached = self.next_token()?.into();
+        Ok(self.cached.as_ref().unwrap())
     }
 
     pub fn next_token(&mut self) -> TokResult<SrcToken> {
@@ -63,55 +58,65 @@ impl Tokenizer {
         }
 
         let ch = loop {
+            let mut pos = *self.pos();
             let buf = self.peek_buf()?;
             let buf_len = buf.len();
             if buf_len == 0 {
-                return Err(TokErr::ReaderEmpty);
+                return Err(TokErr::Io(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "expected another token",
+                )));
             }
 
-            let mut start_ch = (buf_len, '\0');
-            let mut offset = SrcPosition::default();
-            for ch in buf.char_indices() {
-                if !ch.1.is_whitespace() {
+            let mut start_i = buf_len;
+            let mut start_ch = '\0';
+            let mut escaped = false;
+            for (i, ch) in buf.char_indices() {
+                if ch == '\n' {
+                    pos.line += 1;
+                    pos.column = 0;
+                    escaped = false;
+                } else {
+                    pos.column += 1;
+                }
+
+                if ch == '#' {
+                    escaped = true;
+                } else if !escaped && !ch.is_whitespace() {
+                    start_i = i;
                     start_ch = ch;
                     break;
-                } else if ch.1 == '\n' {
-                    offset.line += 1;
-                    offset.column = 0;
-                } else {
-                    offset.column += 1;
                 }
             }
 
-            self.reader.consume(start_ch.0);
-            self.pos.line += offset.line;
-            self.pos.column += offset.column;
+            self.reader.consume(start_i);
+            self.pos = pos;
 
-            if start_ch.0 < buf_len {
-                break start_ch.1;
+            if start_i < buf_len {
+                break start_ch;
             }
         };
 
         let pos = self.pos;
-        let var_token = match ch {
-            '#' => Some(self.read_comment()),
-            '"' => Some(self.read_str_lit()),
-            '\'' => Some(self.read_char_lit()),
-            '+' | '-' => Some(self.read_num_lit()),
-            ch if ch.is_ascii_digit() => Some(self.read_num_lit()),
-            '_' => Some(self.read_alias()),
-            ch if ch.is_ascii_alphabetic() => Some(self.read_alias()),
-            _ => None,
-        };
+        if let Some(tok) = self.read_lex()? {
+            return Ok(SrcToken { tok, pos });
+        }
 
-        let tok = match var_token.transpose() {
-            Ok(Some(tok)) => LEX_TOKENS
-                .get_by_right(tok.to_string().as_str())
-                .cloned()
-                .unwrap_or(tok),
-            Ok(None) => self.read_lex()?,
-            Err(e) => return Err(e),
-        };
+        let tok = match ch {
+            // '#' => self.read_comment(),
+            '"' => self.read_str_lit(),
+            '\'' => self.read_char_lit(),
+            '+' | '-' => self.read_num_lit(),
+            ch if ch.is_ascii_digit() => self.read_num_lit(),
+            '_' => self.read_alias(),
+            ch if ch.is_ascii_alphabetic() => self.read_alias(),
+            ch => {
+                return Err(TokErr::Syntax {
+                    pos,
+                    msg: format!("unexpected character '{}'", ch),
+                })
+            }
+        }?;
 
         Ok(SrcToken { tok, pos })
     }
@@ -121,7 +126,7 @@ impl Tokenizer {
         if &token.tok != tok {
             return Err(TokErr::Syntax {
                 pos: token.pos,
-                msg: "unexpected token",
+                msg: format!("expected {}", tok),
             });
         }
 
@@ -133,7 +138,7 @@ impl Tokenizer {
         if buf.as_bytes().first() != Some(&b'#') {
             return Err(TokErr::Syntax {
                 pos: self.pos,
-                msg: "expected comment",
+                msg: "expected comment".into(),
             });
         }
 
@@ -176,7 +181,7 @@ impl Tokenizer {
         if alias.is_empty() {
             return Err(TokErr::Syntax {
                 pos: self.pos,
-                msg: "expected alias",
+                msg: "expected alias".into(),
             });
         }
 
@@ -195,7 +200,7 @@ impl Tokenizer {
             } else if lit.is_empty() && buf.as_bytes().first() != Some(&b'"') {
                 return Err(TokErr::Syntax {
                     pos: self.pos,
-                    msg: "expected string literal",
+                    msg: "expected string literal".into(),
                 });
             }
 
@@ -243,7 +248,7 @@ impl Tokenizer {
             } else if lit.is_empty() && buf.as_bytes().first() != Some(&b'\'') {
                 return Err(TokErr::Syntax {
                     pos: self.pos,
-                    msg: "expected character literal",
+                    msg: "expected character literal".into(),
                 });
             }
 
@@ -256,7 +261,7 @@ impl Tokenizer {
                     self.reader.consume(i);
                     self.pos.column += i;
                     return Err(TokErr::Syntax {
-                        msg: "unexpected new line",
+                        msg: "unexpected new line".into(),
                         pos: self.pos,
                     });
                 }
@@ -306,7 +311,7 @@ impl Tokenizer {
                     if !is_valid_digit(base_ch, chars.peek().unwrap_or(&(0, NULL_CH)).1) {
                         return Err(TokErr::Syntax {
                             pos: self.pos,
-                            msg: "signs can only be declared in integer literals",
+                            msg: "signs can only be declared in integer literals".into(),
                         });
                     }
 
@@ -352,28 +357,25 @@ impl Tokenizer {
         if first_digit == NULL_CH {
             return Err(TokErr::Syntax {
                 pos: self.pos,
-                msg: "expected numeric literal",
+                msg: "expected numeric literal".into(),
             });
         }
 
         Ok(Token::NumLit(lit.into()))
     }
 
-    fn read_lex(&mut self) -> TokResult<Token> {
+    fn read_lex(&mut self) -> TokResult<Option<Token>> {
         let buf = self.peek_buf()?;
         let max = MAX_LEX_TOKEN_LEN.min(buf.len());
         for n in (1..max).rev() {
             if let Some(tok) = LEX_TOKENS.get_by_right(&buf[..n]) {
                 self.reader.consume(n);
                 self.pos.column += n;
-                return Ok(tok.clone());
+                return Ok(tok.clone().into());
             }
         }
 
-        Err(TokErr::Syntax {
-            pos: self.pos,
-            msg: "expected lexical token",
-        })
+        Ok(None)
     }
 }
 

@@ -1,7 +1,8 @@
 use crate::{
-    ast::{Alias, AliasEval, AstNode, ParseResult, RhsExpr, VisExpr},
-    tokenizer::{Token, Tokenizer},
+    ast::{Alias, AliasEval, AstNode, Expr, ParseResult, RefExpr},
+    tok::{Token, Tokenizer},
 };
+use std::io::BufRead;
 
 #[derive(Debug)]
 pub enum PrimitiveType {
@@ -25,45 +26,23 @@ pub enum PrimitiveType {
 }
 
 #[derive(Debug)]
-pub struct RefExpr {
-    pub src: Option<Alias>,
-    pub eval: Option<AliasEval>,
-}
-
-#[derive(Debug)]
-pub struct DerefExpr;
-
-#[derive(Debug)]
 pub struct RefType {
     pub expr: RefExpr,
-    pub typ: RhsExpr,
-}
-
-#[derive(Debug)]
-pub struct StructField {
-    pub vis: Option<VisExpr>,
-    pub lhs: RhsExpr,
-    pub typ: Option<RhsExpr>,
-    pub val: Option<RhsExpr>,
-}
-
-#[derive(Debug)]
-pub struct StructDef {
-    pub fields: Vec<StructField>,
+    pub typ: Expr,
 }
 
 #[derive(Debug)]
 pub struct ArrayType {
-    pub len: RhsExpr,
+    pub len: Expr,
 }
 
 #[derive(Debug)]
 pub struct FnType {
-    pub ret: RhsExpr,
+    pub ret: Expr,
 }
 
 impl AstNode for PrimitiveType {
-    fn parse(tok: &mut Tokenizer) -> ParseResult<Option<Self>> {
+    fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
         Ok(Some(match tok.peek_token()?.tok {
             Token::Bool => Self::Bool,
             Token::Char => Self::Char,
@@ -87,102 +66,27 @@ impl AstNode for PrimitiveType {
     }
 }
 
-impl AstNode for RefExpr {
-    fn parse(tok: &mut Tokenizer) -> ParseResult<Option<Self>> {
-        if tok.peek_token()?.tok != Token::Ampersand {
-            return Ok(None);
-        }
-
-        tok.expect_token(&Token::Ampersand)?;
-        let src = if tok.peek_token()?.tok == Token::Caret {
-            tok.expect_token(&Token::Caret)?;
-            Some(Alias::expect(tok)?)
-        } else {
-            None
-        };
-
-        Ok(Some(Self {
-            src,
-            eval: AliasEval::parse(tok)?,
-        }))
-    }
-}
-
-impl AstNode for DerefExpr {
-    fn parse(tok: &mut Tokenizer) -> ParseResult<Option<Self>> {
-        Ok(if tok.peek_token()?.tok == Token::Asterisk {
-            tok.expect_token(&Token::Asterisk)?;
-            Some(DerefExpr)
+impl AstNode for RefType {
+    fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
+        Ok(if let Some(expr) = RefExpr::parse(tok)? {
+            Some(Self {
+                expr,
+                typ: Expr::expect(tok)?,
+            })
         } else {
             None
         })
     }
 }
 
-impl AstNode for RefType {
-    fn parse(tok: &mut Tokenizer) -> ParseResult<Option<Self>> {
-        Ok(Some(Self {
-            expr: RefExpr::expect(tok)?,
-            typ: RhsExpr::expect(tok)?,
-        }))
-    }
-}
-
-impl AstNode for StructField {
-    fn parse(tok: &mut Tokenizer) -> ParseResult<Option<Self>> {
-        let vis = VisExpr::parse(tok)?;
-        let lhs = RhsExpr::expect(tok)?;
-
-        let typ = if tok.peek_token()?.tok == Token::Colon {
-            tok.expect_token(&Token::Colon)?;
-            RhsExpr::expect(tok)?.into()
-        } else {
-            None
-        };
-
-        let val = if tok.peek_token()?.tok == Token::Equal {
-            tok.expect_token(&Token::Equal)?;
-            RhsExpr::expect(tok)?.into()
-        } else {
-            None
-        };
-
-        Ok(Some(Self { vis, lhs, typ, val }))
-    }
-}
-
-impl AstNode for StructDef {
-    fn parse(tok: &mut Tokenizer) -> ParseResult<Option<Self>> {
-        tok.expect_token(&Token::LParen)?;
-        let mut fields = Vec::new();
-
-        loop {
-            if tok.peek_token()?.tok == Token::Rparen {
-                break;
-            }
-
-            fields.push(StructField::expect(tok)?);
-
-            if tok.peek_token()?.tok == Token::Rparen {
-                break;
-            }
-
-            tok.expect_token(&Token::Comma)?;
-        }
-
-        tok.expect_token(&Token::Rparen)?;
-        Ok(Some(Self { fields }))
-    }
-}
-
 impl AstNode for ArrayType {
-    fn parse(tok: &mut Tokenizer) -> ParseResult<Option<Self>> {
+    fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
         if tok.peek_token()?.tok != Token::LSqrBrace {
             return Ok(None);
         }
 
-        tok.expect_token(&Token::LSqrBrace);
-        let len = RhsExpr::expect(tok)?;
+        tok.expect_token(&Token::LSqrBrace)?;
+        let len = Expr::expect(tok)?;
         tok.expect_token(&Token::RSqrBrace)?;
 
         Ok(Some(Self { len }))
@@ -190,13 +94,13 @@ impl AstNode for ArrayType {
 }
 
 impl AstNode for FnType {
-    fn parse(tok: &mut Tokenizer) -> ParseResult<Option<Self>> {
+    fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
         if tok.peek_token()?.tok != Token::Arrow {
             return Ok(None);
         }
 
         tok.expect_token(&Token::Arrow)?;
-        let ret = RhsExpr::expect(tok)?;
+        let ret = Expr::expect(tok)?;
         Ok(Some(Self { ret }))
     }
 }

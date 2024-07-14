@@ -1,13 +1,10 @@
-use ast::AstNode;
-use std::{fs::File, io::BufReader};
+use io::{FsImporter, Importer};
 
 pub mod ast;
-pub mod tokenizer;
-pub mod util;
+pub mod io;
+pub mod tok;
 
 fn main() {
-    let file = BufReader::new(File::open("./tour/package.idk").unwrap());
-    let mut tok = tokenizer::Tokenizer::new(Box::new(file));
-    let pkg = ast::EvalScope::parse(&mut tok);
-    println!("{:?}", pkg);
+    let mut importer = FsImporter::new("./tour");
+    importer.import_path(&"./".into()).unwrap();
 }

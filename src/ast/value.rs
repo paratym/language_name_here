@@ -1,166 +1,215 @@
 use crate::{
     ast::{
-        first_match, ArrayLit, AstNode, DerefExpr, ExecScope, ParseResult, RefExpr, RhsExpr,
-        StructDef,
+        first_match, Alias, AliasEval, AstNode, ExecPath, Expr, Ident, IdentExecPath, ParseResult,
+        Vis,
     },
-    tokenizer::{Token, Tokenizer},
+    tok::{Token, Tokenizer},
 };
-use std::sync::Arc;
+use std::io::BufRead;
 
 #[derive(Debug)]
-pub struct Alias {
-    pub alias: Arc<str>,
+pub struct RefExpr {
+    pub src: Option<Alias>,
+    pub eval: Option<AliasEval>,
 }
 
 #[derive(Debug)]
-pub enum EvalPath {
-    Scope(RhsExpr),
-    Call(CallExpr),
+pub struct DerefExpr;
+
+#[derive(Debug)]
+pub struct SpreadExpr {
+    pub val: Expr,
 }
 
 #[derive(Debug)]
-pub enum ExecPath {
-    Ref(RefExpr),
-    Deref(DerefExpr),
-    Static(Alias),
-    Dynamic(ExecScope),
+pub enum ArrayField {
+    Spread(SpreadExpr),
+    Val(Expr),
 }
 
 #[derive(Debug)]
-pub enum CallExpr {
-    Arg(ExecScope),
-    Array(ArrayLit),
-    Struct(StructDef),
+pub struct ArrayLit {
+    pub fields: Vec<ArrayField>,
 }
 
 #[derive(Debug)]
-pub struct DestructureExpr {}
+pub enum StructField {
+    GlobalVis(Vis),
+    Inherit(IdentExecPath),
+    Spread(SpreadExpr),
+    Def {
+        vis: Option<Vis>,
+        ident: Ident,
+        typ: Option<Expr>,
+        val: Option<Expr>,
+    },
+}
 
-impl AstNode for Alias {
-    fn parse(tok: &mut Tokenizer) -> ParseResult<Option<Self>> {
-        Ok(if let Token::Alias(alias_ref) = &tok.peek_token()?.tok {
-            let alias = alias_ref.clone();
-            tok.next_token()?;
-            Some(Self { alias })
+#[derive(Debug)]
+pub struct StructDef {
+    pub fields: Vec<StructField>,
+}
+
+impl AstNode for RefExpr {
+    fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
+        if tok.peek_token()?.tok != Token::Ampersand {
+            return Ok(None);
+        }
+
+        tok.expect_token(&Token::Ampersand)?;
+        let src = if tok.peek_token()?.tok == Token::Caret {
+            tok.expect_token(&Token::Caret)?;
+            Some(Alias::expect(tok)?)
+        } else {
+            None
+        };
+
+        Ok(Some(Self {
+            src,
+            eval: AliasEval::parse(tok)?,
+        }))
+    }
+}
+
+impl AstNode for DerefExpr {
+    fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
+        Ok(if tok.peek_token()?.tok == Token::Asterisk {
+            tok.expect_token(&Token::Asterisk)?;
+            Some(DerefExpr)
         } else {
             None
         })
     }
 }
 
-impl AstNode for EvalPath {
-    fn parse(tok: &mut Tokenizer) -> ParseResult<Option<Self>> {
-        if tok.peek_token()?.tok != Token::DoubleColon {
+impl AstNode for SpreadExpr {
+    fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
+        if tok.peek_token()?.tok != Token::Elipsis {
             return Ok(None);
         }
 
-        tok.expect_token(&Token::DoubleColon)?;
-        Ok(first_match!(tok, Self, CallExpr, RhsExpr))
+        tok.expect_token(&Token::Elipsis)?;
+        let val = Expr::expect(tok)?;
+        Ok(Some(Self { val }))
     }
 }
 
-impl From<RhsExpr> for EvalPath {
-    fn from(value: RhsExpr) -> Self {
-        Self::Scope(value)
+impl AstNode for ArrayField {
+    fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
+        Ok(first_match!(tok, Self, SpreadExpr, Expr))
     }
 }
 
-impl From<CallExpr> for EvalPath {
-    fn from(value: CallExpr) -> Self {
-        Self::Call(value)
+impl From<SpreadExpr> for ArrayField {
+    fn from(value: SpreadExpr) -> Self {
+        Self::Spread(value)
     }
 }
 
-impl AstNode for ExecPath {
-    fn parse(tok: &mut Tokenizer) -> ParseResult<Option<Self>> {
-        if tok.peek_token()?.tok != Token::Dot {
+impl From<Expr> for ArrayField {
+    fn from(value: Expr) -> Self {
+        Self::Val(value)
+    }
+}
+
+impl AstNode for ArrayLit {
+    fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
+        if tok.peek_token()?.tok != Token::LSqrBrace {
             return Ok(None);
         }
 
-        tok.expect_token(&Token::Dot)?;
-        Ok(first_match!(
-            tok, Self, RefExpr, DerefExpr, Alias, ExecScope
-        ))
+        tok.expect_token(&Token::LSqrBrace)?;
+
+        let mut fields = Vec::new();
+        loop {
+            if tok.peek_token()?.tok == Token::RSqrBrace {
+                break;
+            }
+
+            if !fields.is_empty() {
+                tok.expect_token(&Token::Comma)?;
+            }
+
+            fields.push(ArrayField::expect(tok)?);
+        }
+
+        tok.expect_token(&Token::RSqrBrace)?;
+        Ok(Some(Self { fields }))
     }
 }
 
-impl From<RefExpr> for ExecPath {
-    fn from(value: RefExpr) -> Self {
-        Self::Ref(value)
+impl AstNode for StructField {
+    fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
+        if let Some(field) = first_match!(tok, Self, IdentExecPath, SpreadExpr) {
+            return Ok(field.into());
+        }
+
+        let vis = Vis::parse(tok)?;
+        if tok.peek_token()?.tok == Token::Asterisk {
+            if let Some(vis) = vis {
+                tok.expect_token(&Token::Asterisk)?;
+                return Ok(Self::GlobalVis(vis).into());
+            }
+        }
+
+        let ident = Ident::expect(tok)?;
+        let typ = if tok.peek_token()?.tok == Token::Colon {
+            tok.expect_token(&Token::Colon)?;
+            Expr::expect(tok)?.into()
+        } else {
+            None
+        };
+
+        let val = if tok.peek_token()?.tok == Token::Equal {
+            tok.expect_token(&Token::Equal)?;
+            Expr::expect(tok)?.into()
+        } else {
+            None
+        };
+
+        Ok(Some(Self::Def {
+            vis,
+            ident,
+            typ,
+            val,
+        }))
     }
 }
 
-impl From<DerefExpr> for ExecPath {
-    fn from(value: DerefExpr) -> Self {
-        Self::Deref(value)
+impl From<IdentExecPath> for StructField {
+    fn from(value: IdentExecPath) -> Self {
+        Self::Inherit(value)
     }
 }
 
-impl From<Alias> for ExecPath {
-    fn from(value: Alias) -> Self {
-        Self::Static(value)
+impl From<SpreadExpr> for StructField {
+    fn from(value: SpreadExpr) -> Self {
+        Self::Spread(value)
     }
 }
 
-impl From<ExecScope> for ExecPath {
-    fn from(value: ExecScope) -> Self {
-        Self::Dynamic(value)
-    }
-}
-
-impl AstNode for CallExpr {
-    fn parse(tok: &mut Tokenizer) -> ParseResult<Option<Self>> {
-        Ok(first_match!(tok, Self, ExecScope, ArrayLit, StructDef))
-    }
-}
-
-impl From<ExecScope> for CallExpr {
-    fn from(value: ExecScope) -> Self {
-        Self::Arg(value)
-    }
-}
-
-impl From<ArrayLit> for CallExpr {
-    fn from(value: ArrayLit) -> Self {
-        Self::Array(value)
-    }
-}
-
-impl From<StructDef> for CallExpr {
-    fn from(value: StructDef) -> Self {
-        Self::Struct(value)
-    }
-}
-
-impl AstNode for DestructureExpr {
-    fn parse(tok: &mut Tokenizer) -> ParseResult<Option<Self>> {
-        if tok.peek_token()?.tok != Token::Dot {
+impl AstNode for StructDef {
+    fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
+        if tok.peek_token()?.tok == Token::LParen {
+            tok.expect_token(&Token::LParen)?;
+        } else {
             return Ok(None);
         }
 
-        tok.expect_token(&Token::Dot)?;
-        // loop {
-        //     if tok.peek_token()?.tok == Token::Rparen {
-        //         break;
-        //     }
-        //
-        //     expr.fields.push(LhsExpr::parse(tok)?);
-        //
-        //     let token = tok.peek_token()?;
-        //     match token.tok {
-        //         Token::Rparen => break,
-        //         Token::Comma => tok.expect_token(&Token::Comma)?,
-        //         _ => {
-        //             return Err(ParseErr::Syntax {
-        //                 pos: token.pos,
-        //                 msg: "expected ',' or ')'",
-        //             })
-        //         }
-        //     };
-        // }
-        //
-        // tok.expect_token(&Token::Rparen)?;
-        // Ok(expr)
-        todo!()
+        let mut fields = Vec::new();
+        loop {
+            if tok.peek_token()?.tok == Token::Rparen {
+                break;
+            }
+
+            if !fields.is_empty() {
+                tok.expect_token(&Token::Comma)?;
+            }
+
+            fields.push(StructField::expect(tok)?)
+        }
+
+        tok.expect_token(&Token::Rparen)?;
+        Ok(Some(Self { fields }))
     }
 }

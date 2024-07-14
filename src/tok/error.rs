@@ -1,10 +1,9 @@
-use crate::tokenizer::SrcPosition;
+use crate::tok::SrcPosition;
 
 #[derive(Debug)]
 pub enum TokErr {
     Io(std::io::Error),
-    Syntax { pos: SrcPosition, msg: &'static str },
-    ReaderEmpty,
+    Syntax { pos: SrcPosition, msg: String },
 }
 
 pub type TokResult<T> = Result<T, TokErr>;
