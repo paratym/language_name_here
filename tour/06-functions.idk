@@ -3,7 +3,7 @@ fn do_nothing {} # functions can be defined using the 'fn' keyword
 fn the_same_signature: () -> () {} # the signature can be passed explicitly
 # if it is omitted it is assumed to be '() -> ()'
 
-fn with_an_arg: i32::(arg_name) -> () { # all functions have exactly one argument, and one return type
+fn with_an_arg: i32::{arg_name} -> () { # all functions have exactly one argument, and one return type
 	# if no value is returned it is assumed to be '()'
 }
 

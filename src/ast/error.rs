@@ -1,5 +1,8 @@
 use crate::tok::{SrcPosition, TokErr};
-use std::convert::Infallible;
+use std::{
+    convert::Infallible,
+    num::{IntErrorKind, ParseIntError},
+};
 
 #[derive(Debug)]
 pub enum ParseErr {
@@ -29,3 +32,17 @@ impl From<TokErr> for ParseErr {
         }
     }
 }
+
+// impl From<ParseIntError> for ParseErr {
+//     fn from(value: ParseIntError) -> Self {
+//         let msg = match value.kind() {
+//             IntErrorKind::Empty => "expected integer",
+//             IntErrorKind::InvalidDigit => "invalid digit",
+//             IntErrorKind::PosOverflow | IntErrorKind::NegOverflow => "too large",
+//             IntErrorKind::Zero => todo!(),
+//             _ => "unknown",
+//         };
+//
+//         Self::Syntax { pos: , msg: () };
+//     }
+// }

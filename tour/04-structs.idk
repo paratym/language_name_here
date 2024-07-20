@@ -6,34 +6,37 @@ type PubCoords = (pub lat: f64, pub lng: f64); # fields can be made public using
 const coords = PubCoords::(lat = 0, lng = 0); # structs can be constructed by passing the fields using the '::' operator
 
 type PubishCoords = (pub:get lat: f64, pub:get lng: f64); # fields can be made read only using the 'get' modifier
-type PubestCoords = pub (lat: f64, lng: f64); # make all fields public
+type PubestCoords = (pub *, lat: f64, lng: f64); # make all top level fields public
 
 type Origin = (lat: f64 = 0, lng: f64 = 0); # fields can be given default values
 # const origin = Origin::(lat = 5); # error: lat is a private field
 const origin = Origin::(); # types where all private fields have defaults can be constructed 
 
 fn casting_rules {
-	let inline_coords = (lat = f64(0), lng = f64(0)) # structs can be declared inline
+	let inline_coords = (lat = 0, lng = 0); # structs can be declared inline
 	let x = inline_coords.lng; # fields in inline structs are all public
 	# inline_coords.lng = x; # error: inline_coords is not declared as mutable
 
-	let vis_coords = PubCoords::(inline_coords); # structs with the same field names/types can be cast to/from one another
+	let vis_coords = PubCoords::{inline_coords}; # structs with the same field names/types can be cast to/from one another
 	# let secret_coords = Coords::(inline_coords); # error: cannot cast to type with private fields
-	let leaked_documents = PubCoords::(origin); # the reverse is allowed
+	let leaked_documents = PubCoords::{origin}; # the reverse is allowed
 }
 
-type Nested = pub (
+type Nested = (
+	pub *,
 	elevation: f64,
 	coords: PubCoords,
 );
 
-type NestedInline = pub (
+type NestedInline = (
+	pub *,
 	elevation: f64 = 0,
 	coords: ( # struct types can be declared inline
+		# pub lat: f64 = 0, # error fields of un-named structs are always public
 		lat: f64 = 0, 
 		lng: f64 = 0 
 	) 
-)
+);
 
 fn nested_constructors {
 	let nested = Nested::(
@@ -59,12 +62,8 @@ fn nested_constructors {
 		.elevation, # variables with the same name as a field can be passed using the dot operator
 
 		### I dont know how to feel about these last two ###
-		.coords.lat, # it also works for nested structs
-		coords.lng = .coords.lat # a leading dot on the rhs refers to the current struct scope
+		# .coords.lat, # it also works for nested structs
+		# coords.lng = .coords.lat # a leading dot on the rhs refers to the current struct scope
 	);
 }
 
-### arrays ###
-const ints = [0, 1, 2, 3];
-const one = ints[1];
-type Array = i32[4];

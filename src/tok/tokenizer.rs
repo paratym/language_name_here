@@ -18,6 +18,14 @@ impl<R: BufRead> Tokenizer<R> {
         }
     }
 
+    pub fn pos(&self) -> &SrcPosition {
+        if let Some(SrcToken { pos, .. }) = &self.cached {
+            pos
+        } else {
+            &self.pos
+        }
+    }
+
     fn peek_buf(&mut self) -> TokResult<&str> {
         let buf = self.reader.fill_buf()?;
         let mut end_i = buf.len();
@@ -37,24 +45,11 @@ impl<R: BufRead> Tokenizer<R> {
         }
     }
 
-    pub fn pos(&self) -> &SrcPosition {
-        &self.pos
-    }
-
-    pub fn peek_token(&mut self) -> TokResult<&SrcToken> {
-        if let Some(ref tok) = self.cached {
-            return Ok(tok);
-        }
-
-        self.cached = self.next_token()?.into();
-        Ok(self.cached.as_ref().unwrap())
-    }
-
-    pub fn next_token(&mut self) -> TokResult<SrcToken> {
+    fn next_tok_raw(&mut self) -> TokResult<Option<SrcToken>> {
         if let Some(ref tok) = self.cached {
             let token = tok.clone();
             self.cached = None;
-            return Ok(token);
+            return Ok(Some(token));
         }
 
         let ch = loop {
@@ -62,27 +57,20 @@ impl<R: BufRead> Tokenizer<R> {
             let buf = self.peek_buf()?;
             let buf_len = buf.len();
             if buf_len == 0 {
-                return Err(TokErr::Io(std::io::Error::new(
-                    std::io::ErrorKind::UnexpectedEof,
-                    "expected another token",
-                )));
+                return Ok(None);
             }
 
             let mut start_i = buf_len;
             let mut start_ch = '\0';
-            let mut escaped = false;
             for (i, ch) in buf.char_indices() {
                 if ch == '\n' {
                     pos.line += 1;
                     pos.column = 0;
-                    escaped = false;
                 } else {
                     pos.column += 1;
                 }
 
-                if ch == '#' {
-                    escaped = true;
-                } else if !escaped && !ch.is_whitespace() {
+                if !ch.is_whitespace() {
                     start_i = i;
                     start_ch = ch;
                     break;
@@ -99,11 +87,11 @@ impl<R: BufRead> Tokenizer<R> {
 
         let pos = self.pos;
         if let Some(tok) = self.read_lex()? {
-            return Ok(SrcToken { tok, pos });
+            return Ok(Some(SrcToken { tok, pos }));
         }
 
         let tok = match ch {
-            // '#' => self.read_comment(),
+            '#' => self.read_comment(),
             '"' => self.read_str_lit(),
             '\'' => self.read_char_lit(),
             '+' | '-' => self.read_num_lit(),
@@ -118,19 +106,44 @@ impl<R: BufRead> Tokenizer<R> {
             }
         }?;
 
-        Ok(SrcToken { tok, pos })
+        Ok(Some(SrcToken { tok, pos }))
     }
 
-    pub fn expect_token(&mut self, tok: &Token) -> TokResult<SrcToken> {
-        let token = self.next_token()?;
-        if &token.tok != tok {
-            return Err(TokErr::Syntax {
-                pos: token.pos,
-                msg: format!("expected {}", tok),
-            });
+    pub fn next_tok(&mut self) -> TokResult<Option<SrcToken>> {
+        loop {
+            match self.next_tok_raw()? {
+                Some(SrcToken {
+                    tok: Token::Comment(_),
+                    ..
+                }) => continue,
+                next => return Ok(next),
+            }
+        }
+    }
+
+    pub fn peek(&mut self) -> TokResult<Option<&Token>> {
+        if self.cached.is_none() {
+            self.cached = self.next_tok()?;
         }
 
-        Ok(token)
+        Ok(self.cached.as_ref().map(|t| &t.tok))
+    }
+
+    pub fn next_is(&mut self, tok: &Token) -> TokResult<bool> {
+        Ok(self.peek()?.is_some_and(|t| t == tok))
+    }
+
+    pub fn expect(&mut self, tok: &Token) -> TokResult<SrcToken> {
+        let token = self.next_tok()?;
+        match token {
+            Some(token) if &token.tok == tok => Ok(token),
+            _ => {
+                return Err(TokErr::Syntax {
+                    pos: *self.pos(),
+                    msg: format!("expected {}", tok),
+                });
+            }
+        }
     }
 
     fn read_comment(&mut self) -> TokResult<Token> {

@@ -1,9 +1,9 @@
 use crate::{
     ast::{
-        first_match, Alias, AliasEval, AstNode, ExecPath, Expr, Ident, IdentExecPath, ParseResult,
-        Vis,
+        first_match, Alias, AliasEval, AstNode, Expr, Ident, IdentExecPath, ParseErr, ParseResult,
+        Stmt, Vis,
     },
-    tok::{Token, Tokenizer},
+    tok::{SrcToken, Token, Tokenizer},
 };
 use std::io::BufRead;
 
@@ -34,7 +34,7 @@ pub struct ArrayLit {
 
 #[derive(Debug)]
 pub enum StructField {
-    GlobalVis(Vis),
+    VisDef(Vis),
     Inherit(IdentExecPath),
     Spread(SpreadExpr),
     Def {
@@ -52,13 +52,13 @@ pub struct StructDef {
 
 impl AstNode for RefExpr {
     fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
-        if tok.peek_token()?.tok != Token::Ampersand {
+        if !tok.next_is(&Token::Ampersand)? {
             return Ok(None);
         }
 
-        tok.expect_token(&Token::Ampersand)?;
-        let src = if tok.peek_token()?.tok == Token::Caret {
-            tok.expect_token(&Token::Caret)?;
+        tok.expect(&Token::Ampersand)?;
+        let src = if tok.next_is(&Token::Caret)? {
+            tok.expect(&Token::Caret)?;
             Some(Alias::expect(tok)?)
         } else {
             None
@@ -73,22 +73,22 @@ impl AstNode for RefExpr {
 
 impl AstNode for DerefExpr {
     fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
-        Ok(if tok.peek_token()?.tok == Token::Asterisk {
-            tok.expect_token(&Token::Asterisk)?;
-            Some(DerefExpr)
-        } else {
-            None
-        })
+        if !tok.next_is(&Token::Asterisk)? {
+            return Ok(None);
+        }
+
+        tok.expect(&Token::Asterisk)?;
+        Ok(Some(Self))
     }
 }
 
 impl AstNode for SpreadExpr {
     fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
-        if tok.peek_token()?.tok != Token::Elipsis {
+        if !tok.next_is(&Token::Elipsis)? {
             return Ok(None);
         }
 
-        tok.expect_token(&Token::Elipsis)?;
+        tok.expect(&Token::Elipsis)?;
         let val = Expr::expect(tok)?;
         Ok(Some(Self { val }))
     }
@@ -114,26 +114,37 @@ impl From<Expr> for ArrayField {
 
 impl AstNode for ArrayLit {
     fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
-        if tok.peek_token()?.tok != Token::LSqrBrace {
+        if !tok.next_is(&Token::LSqrBrace)? {
             return Ok(None);
         }
 
-        tok.expect_token(&Token::LSqrBrace)?;
-
+        tok.expect(&Token::LSqrBrace)?;
         let mut fields = Vec::new();
+        let mut separated = false;
+
         loop {
-            if tok.peek_token()?.tok == Token::RSqrBrace {
-                break;
+            match tok.peek()? {
+                Some(Token::RSqrBrace) => {
+                    tok.expect(&Token::RSqrBrace)?;
+                    break;
+                }
+                Some(Token::Comma) if !separated => {
+                    tok.expect(&Token::Comma)?;
+                    separated = true;
+                }
+                _ if !fields.is_empty() && !separated => {
+                    return Err(ParseErr::Syntax {
+                        pos: *tok.pos(),
+                        msg: "expected ',' or ']'".into(),
+                    })
+                }
+                _ => {
+                    fields.push(ArrayField::expect(tok)?);
+                    separated = false;
+                }
             }
-
-            if !fields.is_empty() {
-                tok.expect_token(&Token::Comma)?;
-            }
-
-            fields.push(ArrayField::expect(tok)?);
         }
 
-        tok.expect_token(&Token::RSqrBrace)?;
         Ok(Some(Self { fields }))
     }
 }
@@ -145,23 +156,23 @@ impl AstNode for StructField {
         }
 
         let vis = Vis::parse(tok)?;
-        if tok.peek_token()?.tok == Token::Asterisk {
+        if tok.next_is(&Token::Asterisk)? {
             if let Some(vis) = vis {
-                tok.expect_token(&Token::Asterisk)?;
-                return Ok(Self::GlobalVis(vis).into());
+                tok.expect(&Token::Asterisk)?;
+                return Ok(Self::VisDef(vis).into());
             }
         }
 
         let ident = Ident::expect(tok)?;
-        let typ = if tok.peek_token()?.tok == Token::Colon {
-            tok.expect_token(&Token::Colon)?;
+        let typ = if tok.next_is(&Token::Colon)? {
+            tok.expect(&Token::Colon)?;
             Expr::expect(tok)?.into()
         } else {
             None
         };
 
-        let val = if tok.peek_token()?.tok == Token::Equal {
-            tok.expect_token(&Token::Equal)?;
+        let val = if tok.next_is(&Token::Equal)? {
+            tok.expect(&Token::Equal)?;
             Expr::expect(tok)?.into()
         } else {
             None
@@ -190,26 +201,38 @@ impl From<SpreadExpr> for StructField {
 
 impl AstNode for StructDef {
     fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
-        if tok.peek_token()?.tok == Token::LParen {
-            tok.expect_token(&Token::LParen)?;
-        } else {
+        if !tok.next_is(&Token::LParen)? {
             return Ok(None);
         }
 
+        tok.expect(&Token::LParen)?;
         let mut fields = Vec::new();
+        let mut separated = false;
+
         loop {
-            if tok.peek_token()?.tok == Token::Rparen {
-                break;
+            match tok.peek()? {
+                Some(Token::Rparen) => {
+                    tok.expect(&Token::Rparen)?;
+                    break;
+                }
+                Some(Token::Comma) if !separated => {
+                    tok.expect(&Token::Comma)?;
+                    separated = true;
+                    continue;
+                }
+                _ if !separated && !fields.is_empty() => {
+                    return Err(ParseErr::Syntax {
+                        pos: *tok.pos(),
+                        msg: "exected ',' or ')'".into(),
+                    });
+                }
+                _ => {
+                    fields.push(StructField::expect(tok)?);
+                    separated = false;
+                }
             }
-
-            if !fields.is_empty() {
-                tok.expect_token(&Token::Comma)?;
-            }
-
-            fields.push(StructField::expect(tok)?)
         }
 
-        tok.expect_token(&Token::Rparen)?;
         Ok(Some(Self { fields }))
     }
 }

@@ -2,7 +2,7 @@ use crate::{
     ast::{
         first_match, first_match_chain, Alias, ArrayLit, ArrayType, AstNode, BoolLit, CharLit,
         DerefExpr, ExecScope, FnType, NumLit, ParseResult, PrimitiveType, RefExpr, RefType,
-        ScopeAlias, StrLit, StructDef,
+        ScopeAlias, StrLit, StructDef, UnionType,
     },
     tok::{Token, Tokenizer},
 };
@@ -47,17 +47,18 @@ pub enum Expr {
 
     PrimitiveType(PrimitiveType),
     RefType(Rc<RefType>),
+    UnionType(Rc<UnionType>),
     ArrayType { typ: Rc<Expr>, len: Rc<ArrayType> },
     FnType { arg: Rc<Expr>, ret: Rc<FnType> },
 }
 
 impl AstNode for EvalPath {
     fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
-        if tok.peek_token()?.tok != Token::DoubleColon {
+        if !tok.next_is(&Token::DoubleColon)? {
             return Ok(None);
         }
 
-        tok.expect_token(&Token::DoubleColon)?;
+        tok.expect(&Token::DoubleColon)?;
         Ok(first_match!(tok, Self, CallExpr, Expr))
     }
 }
@@ -76,11 +77,11 @@ impl From<CallExpr> for EvalPath {
 
 impl AstNode for ExecPath {
     fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
-        if tok.peek_token()?.tok != Token::Dot {
+        if !tok.next_is(&Token::Dot)? {
             return Ok(None);
         }
 
-        tok.expect_token(&Token::Dot)?;
+        tok.expect(&Token::Dot)?;
         Ok(first_match!(
             tok, Self, RefExpr, DerefExpr, Alias, ExecScope
         ))
@@ -150,6 +151,7 @@ impl AstNode for Expr {
             ArrayLit,
             PrimitiveType,
             RefType,
+            UnionType,
             StructDef
         );
 
@@ -254,6 +256,12 @@ impl From<PrimitiveType> for Expr {
 impl From<RefType> for Expr {
     fn from(value: RefType) -> Self {
         Self::RefType(value.into())
+    }
+}
+
+impl From<UnionType> for Expr {
+    fn from(value: UnionType) -> Self {
+        Self::UnionType(value.into())
     }
 }
 

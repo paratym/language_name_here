@@ -1,12 +1,11 @@
 use crate::{
-    ast::{first_match, AliasDecl, AstNode, ExecScope, Expr, ParseErr, ParseResult, UseDecl},
+    ast::{first_match, first_match_chain, AstNode, Decl, ExecScope, Expr, ParseErr, ParseResult},
     tok::{Token, Tokenizer},
 };
 use std::{io::BufRead, rc::Rc};
 
 #[derive(Debug)]
 pub struct AssignStmt {
-    pub lhs: Expr,
     pub rhs: Expr,
 }
 
@@ -51,41 +50,41 @@ pub struct WhileStmt {
 
 #[derive(Debug)]
 pub enum Stmt {
-    AliasDecl(AliasDecl),
-    UseDecl(UseDecl),
-    Assign(AssignStmt),
-    Unary(UnaryStmt),
+    Decl(Decl),
     Expr(Expr),
+
+    Assign { lhs: Expr, stmt: AssignStmt },
+    Unary(UnaryStmt),
     If(IfStmt),
     While(WhileStmt),
-    // Match(MatchStmt),
 }
 
 impl AstNode for AssignStmt {
     fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
-        let lhs = if let Some(expr) = Expr::parse(tok)? {
-            expr
-        } else {
+        if !tok.next_is(&Token::Equal)? {
             return Ok(None);
-        };
+        }
 
-        tok.expect_token(&Token::Equal)?;
+        tok.expect(&Token::Equal)?;
         let rhs = Expr::expect(tok)?;
-        tok.expect_token(&Token::Semicolon)?;
+        tok.expect(&Token::Semicolon)?;
 
-        Ok(Some(Self { lhs, rhs }))
+        Ok(Some(Self { rhs }))
     }
 }
 
 impl AstNode for UnaryOp {
     fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
-        Ok(Some(match tok.peek_token()?.tok {
-            Token::Return => Self::Return,
-            Token::Defer => Self::Defer,
-            Token::Continue => Self::Continue,
-            Token::Break => Self::Break,
+        let op = match tok.peek()? {
+            Some(Token::Return) => Self::Return,
+            Some(Token::Defer) => Self::Defer,
+            Some(Token::Continue) => Self::Continue,
+            Some(Token::Break) => Self::Break,
             _ => return Ok(None),
-        }))
+        };
+
+        tok.next_tok()?;
+        Ok(Some(op))
     }
 }
 
@@ -98,7 +97,7 @@ impl AstNode for UnaryStmt {
         };
 
         let rhs = Expr::expect(tok)?;
-        tok.expect_token(&Token::Semicolon)?;
+        tok.expect(&Token::Semicolon)?;
 
         Ok(Some(Self { op, rhs }))
     }
@@ -106,12 +105,11 @@ impl AstNode for UnaryStmt {
 
 impl AstNode for IfStmt {
     fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
-        if tok.peek_token()?.tok == Token::If {
-            tok.expect_token(&Token::If)?;
-        } else {
+        if !tok.next_is(&Token::If)? {
             return Ok(None);
         }
 
+        tok.expect(&Token::If)?;
         let cond = Expr::expect(tok)?;
         let body = ExecScope::expect(tok)?;
         let chain = ElseStmt::parse(tok)?;
@@ -122,12 +120,11 @@ impl AstNode for IfStmt {
 
 impl AstNode for ElseStmt {
     fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
-        if tok.peek_token()?.tok == Token::Else {
-            tok.expect_token(&Token::Else)?;
-        } else {
+        if !tok.next_is(&Token::Else)? {
             return Ok(None);
         }
 
+        tok.expect(&Token::Else)?;
         Ok(Some(if let Some(cond) = IfStmt::parse(tok)? {
             Self::ElseIf(cond.into())
         } else if let Some(scope) = ExecScope::parse(tok)? {
@@ -143,16 +140,15 @@ impl AstNode for ElseStmt {
 
 impl AstNode for WhileStmt {
     fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
-        if tok.peek_token()?.tok == Token::While {
-            tok.expect_token(&Token::While)?;
-        } else {
+        if !tok.next_is(&Token::While)? {
             return Ok(None);
         }
 
-        Ok(Some(Self {
-            cond: Expr::expect(tok)?,
-            body: ExecScope::expect(tok)?,
-        }))
+        tok.expect(&Token::While)?;
+        let cond = Expr::expect(tok)?;
+        let body = ExecScope::expect(tok)?;
+
+        Ok(Some(Self { cond, body }))
     }
 }
 
@@ -192,15 +188,28 @@ impl AstNode for WhileStmt {
 
 impl AstNode for Stmt {
     fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
-        Ok(first_match!(
-            tok, Self, UnaryStmt, IfStmt, WhileStmt, AssignStmt
-        ))
+        let base = first_match!(tok, Self, Decl, UnaryStmt, IfStmt, WhileStmt, Expr);
+        let expr = match base {
+            Some(Stmt::Expr(expr)) => expr,
+            _ => return Ok(base),
+        };
+
+        Ok(Some(first_match_chain!(tok, Self, expr, AssignStmt,).1))
     }
 }
 
-impl From<AssignStmt> for Stmt {
-    fn from(value: AssignStmt) -> Self {
-        Self::Assign(value)
+impl From<Decl> for Stmt {
+    fn from(value: Decl) -> Self {
+        Self::Decl(value)
+    }
+}
+
+impl From<(Expr, AssignStmt)> for Stmt {
+    fn from(value: (Expr, AssignStmt)) -> Self {
+        Self::Assign {
+            lhs: value.0,
+            stmt: value.1,
+        }
     }
 }
 
@@ -219,5 +228,11 @@ impl From<IfStmt> for Stmt {
 impl From<WhileStmt> for Stmt {
     fn from(value: WhileStmt) -> Self {
         Self::While(value)
+    }
+}
+
+impl From<Expr> for Stmt {
+    fn from(value: Expr) -> Self {
+        Self::Expr(value)
     }
 }

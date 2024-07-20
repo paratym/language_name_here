@@ -1,7 +1,7 @@
 use crate::{
-    ast::{AstNode, Expr, GlobalEvalScope},
+    ast::{AstNode, Decl, Expr, Stmt},
     io::{Importer, IoErr, IoResult},
-    tok::Tokenizer,
+    tok::{TokErr, Tokenizer},
 };
 use std::{fs::File, io::BufReader, path::PathBuf};
 
@@ -24,9 +24,8 @@ impl Importer for FsImporter {
         todo!()
     }
 
-    fn import_path(&mut self, scope_path: &Self::Path) -> IoResult<GlobalEvalScope> {
+    fn import_path(&mut self, scope_path: &Self::Path) -> IoResult<()> {
         let mut dir = self.root.join(scope_path).read_dir()?;
-        let mut scope = GlobalEvalScope::new();
 
         while let Some(src) = dir.next().transpose()? {
             let path = src.path();
@@ -38,13 +37,26 @@ impl Importer for FsImporter {
 
             let file = BufReader::new(File::open(&path)?);
             let mut tok = Tokenizer::new(file);
-            let file_scope = GlobalEvalScope::expect(&mut tok)
-                .map_err(|e| IoErr::from_parse_err(e, path.to_string_lossy().to_string()))?;
+            println!("{:?}", path);
 
-            println!("{:?} {:?}", path, file_scope);
-            scope.merge(file_scope);
+            loop {
+                if tok
+                    .peek()
+                    .map_err(|e| {
+                        IoErr::from_parse_err(e.into(), path.to_string_lossy().to_string())
+                    })?
+                    .is_none()
+                {
+                    break;
+                }
+
+                let decl = Decl::expect(&mut tok)
+                    .map_err(|e| IoErr::from_parse_err(e, path.to_string_lossy().to_string()))?;
+
+                println!("{:?}", decl);
+            }
         }
 
-        Ok(scope)
+        Ok(())
     }
 }

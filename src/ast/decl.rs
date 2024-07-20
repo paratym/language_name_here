@@ -1,7 +1,7 @@
 use crate::{
     ast::{
         first_match, Alias, AstNode, EvalScope, ExecScope, Expr, Ident, ParseErr, ParseResult,
-        ScopeAlias,
+        ScopeAlias, Stmt,
     },
     tok::{Token, Tokenizer},
 };
@@ -22,7 +22,7 @@ pub struct Vis {
 #[derive(Debug)]
 pub struct VisDecl {
     pub vis: Vis,
-    pub decl: Rc<Decl>,
+    pub stmt: Rc<Stmt>,
 }
 
 #[derive(Debug)]
@@ -38,7 +38,7 @@ pub struct AliasDecl {
     pub eval: AliasEval,
     pub ident: Ident,
     pub bounds: Option<Expr>,
-    pub rhs: Expr,
+    pub rhs: Option<Expr>,
 }
 
 #[derive(Debug)]
@@ -63,12 +63,12 @@ pub struct EnumVarDecl {
     pub val: Option<Expr>,
 }
 
-#[derive(Debug)]
-pub struct EnumDecl {
-    pub ident: Ident,
-    pub typ: Option<Expr>,
-    pub vars: Vec<EnumVarDecl>,
-}
+// #[derive(Debug)]
+// pub struct EnumDecl {
+//     pub ident: Ident,
+//     pub typ: Option<Expr>,
+//     pub vars: Vec<EnumVarDecl>,
+// }
 
 #[derive(Debug)]
 pub struct IfaceDecl {
@@ -98,7 +98,6 @@ pub enum Decl {
     Vis(VisDecl),
     Alias(AliasDecl),
     Fn(FnDecl),
-    Enum(EnumDecl),
     Iface(IfaceDecl),
     Mod(ModDecl),
     Use(UseDecl),
@@ -107,42 +106,44 @@ pub enum Decl {
 
 impl AstNode for Access {
     fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
-        let access = match tok.peek_token()?.tok {
-            Token::Get => Self::Get,
-            Token::Set => Self::Set,
+        let access = match tok.peek()? {
+            Some(Token::Get) => Self::Get,
+            Some(Token::Set) => Self::Set,
             _ => return Ok(None),
         };
 
-        tok.next_token()?;
+        tok.next_tok()?;
         Ok(Some(access))
     }
 }
 
 impl AstNode for Vis {
     fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
-        if tok.peek_token()?.tok != Token::Pub {
+        if !tok.next_is(&Token::Pub)? {
             return Ok(None);
         }
 
-        tok.expect_token(&Token::Pub)?;
+        tok.expect(&Token::Pub)?;
         let mut scope = None;
         let mut access = None;
 
         loop {
-            if tok.peek_token()?.tok != Token::Colon {
+            if !tok.next_is(&Token::Colon)? {
                 return Ok(Some(Self { scope, access }));
             }
 
-            tok.expect_token(&Token::Colon)?;
-            let token = tok.next_token()?;
-            match token.tok {
-                Token::Pkg | Token::Mod if scope.is_none() => {
+            tok.expect(&Token::Colon)?;
+
+            match tok.peek()? {
+                Some(Token::Pkg | Token::Mod) if scope.is_none() => {
                     scope = ScopeAlias::expect(tok)?.into()
                 }
-                Token::Get | Token::Set if access.is_none() => access = Access::expect(tok)?.into(),
+                Some(Token::Get | Token::Set) if access.is_none() => {
+                    access = Access::expect(tok)?.into()
+                }
                 _ => {
                     return Err(ParseErr::Syntax {
-                        pos: token.pos,
+                        pos: *tok.pos(),
                         msg: "expected unique scope or access alias".into(),
                     })
                 }
@@ -159,22 +160,22 @@ impl AstNode for VisDecl {
             return Ok(None);
         };
 
-        let decl = Decl::expect(tok)?.into();
-        Ok(Some(Self { vis, decl }))
+        let stmt = Stmt::expect(tok)?.into();
+        Ok(Some(Self { vis, stmt }))
     }
 }
 
 impl AstNode for AliasEval {
     fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
-        let eval = match tok.peek_token()?.tok {
-            Token::Let => Self::Let,
-            Token::Var => Self::Var,
-            Token::Const => Self::Const,
-            Token::Type => Self::Type,
+        let eval = match tok.peek()? {
+            Some(Token::Let) => Self::Let,
+            Some(Token::Var) => Self::Var,
+            Some(Token::Const) => Self::Const,
+            Some(Token::Type) => Self::Type,
             _ => return Ok(None),
         };
 
-        tok.next_token()?;
+        tok.next_tok()?;
         Ok(Some(eval))
     }
 }
@@ -188,17 +189,21 @@ impl AstNode for AliasDecl {
         };
 
         let ident = Ident::expect(tok)?;
-        let bounds = if tok.peek_token()?.tok == Token::Colon {
-            tok.expect_token(&Token::Colon)?;
+        let bounds = if tok.next_is(&Token::Colon)? {
+            tok.expect(&Token::Colon)?;
             Some(Expr::expect(tok)?)
         } else {
             None
         };
 
-        tok.expect_token(&Token::Equal)?;
-        let rhs = Expr::expect(tok)?;
-        tok.expect_token(&Token::Semicolon)?;
+        let rhs = if tok.next_is(&Token::Equal)? {
+            tok.expect(&Token::Equal)?;
+            Some(Expr::expect(tok)?)
+        } else {
+            None
+        };
 
+        tok.expect(&Token::Semicolon)?;
         Ok(Some(Self {
             eval,
             ident,
@@ -216,9 +221,9 @@ impl AstNode for FnSigDecl {
             return Ok(None);
         };
 
-        tok.expect_token(&Token::Arrow)?;
+        tok.expect(&Token::Arrow)?;
         let two = Expr::expect(tok)?;
-        if tok.peek_token()?.tok != Token::Arrow {
+        if !tok.next_is(&Token::Arrow)? {
             return Ok(Some(Self {
                 rcv: None,
                 arg: one,
@@ -226,7 +231,7 @@ impl AstNode for FnSigDecl {
             }));
         }
 
-        tok.expect_token(&Token::Arrow)?;
+        tok.expect(&Token::Arrow)?;
         Ok(Some(Self {
             rcv: one.into(),
             arg: two,
@@ -237,14 +242,14 @@ impl AstNode for FnSigDecl {
 
 impl AstNode for FnDecl {
     fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
-        if tok.peek_token()?.tok != Token::Fn {
+        if !tok.next_is(&Token::Fn)? {
             return Ok(None);
         }
 
-        tok.expect_token(&Token::Fn)?;
+        tok.expect(&Token::Fn)?;
         let ident = Ident::expect(tok)?;
-        let sig = if tok.peek_token()?.tok == Token::Colon {
-            tok.expect_token(&Token::Colon)?;
+        let sig = if tok.next_is(&Token::Colon)? {
+            tok.expect(&Token::Colon)?;
             FnSigDecl::expect(tok)?.into()
         } else {
             None
@@ -252,95 +257,23 @@ impl AstNode for FnDecl {
 
         let body = ExecScope::parse(tok)?;
         if body.is_none() {
-            tok.expect_token(&Token::Semicolon)?;
+            tok.expect(&Token::Semicolon)?;
         }
 
         Ok(Some(Self { ident, sig, body }))
     }
 }
 
-impl AstNode for EnumVarDecl {
-    fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
-        let ident = if let Some(lhs) = Ident::parse(tok)? {
-            lhs
-        } else {
-            return Ok(None);
-        };
-
-        let key = if tok.peek_token()?.tok == Token::Equal {
-            tok.expect_token(&Token::Equal)?;
-            Expr::expect(tok)?.into()
-        } else {
-            None
-        };
-
-        let typ = if tok.peek_token()?.tok == Token::Colon {
-            tok.expect_token(&Token::Colon)?;
-            Expr::expect(tok)?.into()
-        } else {
-            None
-        };
-
-        let val = if tok.peek_token()?.tok == Token::Equal {
-            tok.expect_token(&Token::Equal)?;
-            Expr::expect(tok)?.into()
-        } else {
-            None
-        };
-
-        Ok(Some(Self {
-            ident,
-            key,
-            typ,
-            val,
-        }))
-    }
-}
-
-impl AstNode for EnumDecl {
-    fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
-        if tok.peek_token()?.tok != Token::Enum {
-            return Ok(None);
-        }
-
-        tok.expect_token(&Token::Enum)?;
-        let ident = Ident::expect(tok)?;
-        let typ = if tok.peek_token()?.tok == Token::Colon {
-            tok.expect_token(&Token::Colon)?;
-            Expr::expect(tok)?.into()
-        } else {
-            None
-        };
-
-        tok.expect_token(&Token::LCurlyBrace)?;
-        let mut vars = Vec::new();
-        loop {
-            if tok.peek_token()?.tok == Token::RCurlyBrace {
-                break;
-            }
-
-            if !vars.is_empty() {
-                tok.expect_token(&Token::Comma)?;
-            }
-
-            vars.push(EnumVarDecl::expect(tok)?);
-        }
-
-        tok.expect_token(&Token::RCurlyBrace)?;
-        Ok(Some(Self { ident, typ, vars }))
-    }
-}
-
 impl AstNode for IfaceDecl {
     fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
-        if tok.peek_token()?.tok != Token::Iface {
+        if !tok.next_is(&Token::Iface)? {
             return Ok(None);
         }
 
-        tok.expect_token(&Token::Iface)?;
+        tok.expect(&Token::Iface)?;
         let ident = Ident::expect(tok)?;
-        let typ = if tok.peek_token()?.tok == Token::Colon {
-            tok.expect_token(&Token::Colon)?;
+        let typ = if tok.next_is(&Token::Colon)? {
+            tok.expect(&Token::Colon)?;
             Expr::expect(tok)?.into()
         } else {
             None
@@ -353,14 +286,14 @@ impl AstNode for IfaceDecl {
 
 impl AstNode for ModDecl {
     fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
-        if tok.peek_token()?.tok != Token::Mod {
+        if !tok.next_is(&Token::Mod)? {
             return Ok(None);
         }
 
-        tok.expect_token(&Token::Mod)?;
+        tok.expect(&Token::Mod)?;
         let ident = Ident::expect(tok)?;
-        let typ = if tok.peek_token()?.tok == Token::Colon {
-            tok.expect_token(&Token::Colon)?;
+        let typ = if tok.next_is(&Token::Colon)? {
+            tok.expect(&Token::Colon)?;
             Expr::expect(tok)?.into()
         } else {
             None
@@ -368,7 +301,7 @@ impl AstNode for ModDecl {
 
         let scope = EvalScope::parse(tok)?;
         if scope.is_none() {
-            tok.expect_token(&Token::Semicolon)?;
+            tok.expect(&Token::Semicolon)?;
         };
 
         Ok(Some(Self { ident, typ, scope }))
@@ -377,40 +310,31 @@ impl AstNode for ModDecl {
 
 impl AstNode for Annotation {
     fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
-        if tok.peek_token()?.tok == Token::Bang {
-            tok.expect_token(&Token::Bang)?;
-        } else {
+        if !tok.next_is(&Token::Bang)? {
             return Ok(None);
         }
 
-        tok.expect_token(&Token::LSqrBrace)?;
+        tok.expect(&Token::Bang)?;
+        tok.expect(&Token::LSqrBrace)?;
         let tag = Alias::expect(tok)?;
 
-        let token = tok.peek_token()?;
-        match token.tok {
-            Token::RSqrBrace => {
-                tok.expect_token(&Token::RSqrBrace)?;
-                let decl = Decl::expect(tok)?;
-                Ok(Some(Self::Decl { tag, decl }))
-            }
-            Token::Equal => {
-                tok.expect_token(&Token::Equal)?;
-                let expr = Expr::expect(tok)?;
-                tok.expect_token(&Token::RSqrBrace)?;
-                Ok(Some(Self::Expr { tag, expr }))
-            }
-            _ => Err(ParseErr::Syntax {
-                pos: token.pos,
-                msg: "expected '=' or ']'".into(),
-            }),
+        if tok.next_is(&Token::RSqrBrace)? {
+            tok.expect(&Token::RSqrBrace)?;
+            let decl = Decl::expect(tok)?;
+            return Ok(Some(Self::Decl { tag, decl }));
         }
+
+        tok.expect(&Token::Equal)?;
+        let expr = Expr::expect(tok)?;
+        tok.expect(&Token::RSqrBrace)?;
+
+        Ok(Some(Self::Expr { tag, expr }))
     }
 }
-
 impl AstNode for Decl {
     fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
         Ok(first_match!(
-            tok, Self, VisDecl, AliasDecl, FnDecl, EnumDecl, IfaceDecl, ModDecl, Annotation
+            tok, Self, VisDecl, AliasDecl, FnDecl, IfaceDecl, ModDecl, Annotation
         ))
     }
 }
@@ -430,12 +354,6 @@ impl From<AliasDecl> for Decl {
 impl From<FnDecl> for Decl {
     fn from(value: FnDecl) -> Self {
         Self::Fn(value)
-    }
-}
-
-impl From<EnumDecl> for Decl {
-    fn from(value: EnumDecl) -> Self {
-        Self::Enum(value)
     }
 }
 

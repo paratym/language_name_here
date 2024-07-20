@@ -2,7 +2,6 @@ use bimap::BiMap;
 use lazy_static::lazy_static;
 use std::{
     fmt::{self, Display},
-    ops::Add,
     sync::Arc,
 };
 
@@ -51,6 +50,7 @@ pub enum Token {
     NumLit(Arc<str>),
     LParen,
     Rparen,
+    Union,
     Colon,
     Comma,
     Dot,
@@ -74,7 +74,6 @@ pub enum Token {
     Break,
     Continue,
     Match,
-    Enum,
     Iface,
     Impl,
     Bang,
@@ -134,6 +133,7 @@ lazy_static! {
         map.insert(Token::F64, "f64");
         map.insert(Token::LParen, "(");
         map.insert(Token::Rparen, ")");
+        map.insert(Token::Union, "union");
         map.insert(Token::Colon, ":");
         map.insert(Token::Comma, ",");
         map.insert(Token::Dot, ".");
@@ -157,8 +157,7 @@ lazy_static! {
         map.insert(Token::Break, "break");
         map.insert(Token::Continue, "continue");
         map.insert(Token::Match, "match");
-        map.insert(Token::Enum, "enum");
-        map.insert(Token::Iface, "interface");
+        map.insert(Token::Iface, "iface");
         map.insert(Token::Impl, "impl");
         map.insert(Token::Bang, "!");
         map.insert(Token::LAngleBrace, "<");

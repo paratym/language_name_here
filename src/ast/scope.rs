@@ -1,5 +1,5 @@
 use crate::{
-    ast::{AstNode, Decl, ParseErr, ParseResult, Stmt},
+    ast::{AstNode, Decl, ParseResult, Stmt},
     tok::{Token, Tokenizer},
 };
 use std::io::BufRead;
@@ -19,59 +19,34 @@ pub struct ExecScope {
     pub stmts: Vec<Stmt>,
 }
 
-impl GlobalEvalScope {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn merge(&mut self, other: Self) {
-        self.decls.extend(other.decls)
-    }
-}
-
-impl AstNode for GlobalEvalScope {
-    fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
-        Ok(parse_scope(tok, false)?.map(|decls| Self { decls }))
-    }
-}
-
 impl AstNode for EvalScope {
     fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
-        Ok(parse_scope(tok, true)?.map(|decls| Self { decls }))
+        Ok(parse_scope(tok)?.map(|decls| Self { decls }))
     }
 }
 
 impl AstNode for ExecScope {
     fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
-        Ok(parse_scope(tok, true)?.map(|stmts| Self { stmts }))
+        Ok(parse_scope(tok)?.map(|stmts| Self { stmts }))
     }
 }
 
-fn parse_scope<N: AstNode>(
-    tok: &mut Tokenizer<impl BufRead>,
-    inline: bool,
-) -> ParseResult<Option<Vec<N>>> {
-    if inline {
-        if tok.peek_token()?.tok != Token::LCurlyBrace {
-            return Ok(None);
-        }
-
-        tok.expect_token(&Token::LCurlyBrace)?;
+fn parse_scope<N: AstNode>(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Vec<N>>> {
+    if !tok.next_is(&Token::LCurlyBrace)? {
+        return Ok(None);
     }
 
+    tok.expect(&Token::LCurlyBrace);
     let mut items = Vec::new();
+
     loop {
         match N::parse(tok) {
             Ok(Some(item)) => items.push(item),
             Ok(None) => break,
-            Err(ParseErr::Io(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
             Err(e) => return Err(e),
         }
     }
 
-    if inline {
-        tok.expect_token(&Token::RCurlyBrace)?;
-    }
-
+    tok.expect(&Token::RCurlyBrace)?;
     Ok(Some(items))
 }

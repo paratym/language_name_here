@@ -1,6 +1,6 @@
 use crate::{
     ast::{AstNode, ParseResult},
-    tok::{Token, Tokenizer},
+    tok::{SrcToken, Token, Tokenizer},
 };
 use std::{io::BufRead, rc::Rc, sync::Arc};
 
@@ -45,35 +45,37 @@ pub enum Ident {
 
 impl AstNode for ScopeAlias {
     fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
-        let scope = match tok.peek_token()?.tok {
-            Token::Pkg => Self::Pkg,
-            Token::Mod => Self::Mod,
+        let scope = match tok.peek()? {
+            Some(Token::Pkg) => Self::Pkg,
+            Some(Token::Mod) => Self::Mod,
             _ => return Ok(None),
         };
 
-        tok.next_token()?;
+        tok.next_tok()?;
         Ok(Some(scope))
     }
 }
 
 impl AstNode for Alias {
     fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
-        Ok(if let Token::Alias(alias) = tok.peek_token()?.tok.clone() {
-            tok.next_token()?;
-            Some(Self { alias })
-        } else {
-            None
-        })
+        match tok.peek()? {
+            Some(Token::Alias(_alias)) => {
+                let alias = _alias.clone();
+                tok.next_tok()?;
+                Ok(Some(Self { alias }))
+            }
+            _ => Ok(None),
+        }
     }
 }
 
 impl AstNode for IdentEvalPath {
     fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
-        if tok.peek_token()?.tok != Token::DoubleColon {
+        if !tok.next_is(&Token::DoubleColon)? {
             return Ok(None);
         }
 
-        tok.expect_token(&Token::DoubleColon)?;
+        tok.expect(&Token::DoubleColon)?;
         let path = Ident::expect(tok)?;
         Ok(Some(Self { path }))
     }
@@ -81,11 +83,11 @@ impl AstNode for IdentEvalPath {
 
 impl AstNode for IdentExecPath {
     fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
-        if tok.peek_token()?.tok != Token::Dot {
+        if !tok.next_is(&Token::Dot)? {
             return Ok(None);
         }
 
-        tok.expect_token(&Token::Dot)?;
+        tok.expect(&Token::Dot)?;
         let path = Ident::expect(tok)?;
         Ok(Some(Self { path }))
     }
