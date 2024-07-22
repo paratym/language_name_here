@@ -8,8 +8,9 @@
 # bool # true/false
 
 type Num = i32;
-# const num: Num = 0; # error: expected value of type 'Num' found 'i32'
-const num: Num = Num::(0); # values can be explicitly cast
-const reverse_it: i32 = i32::(num);
+const int: i32 = 0;
+# const num: Num = int; # error: expected value of type 'Num' found 'i32'
+const num: Num = Num::{int}; # values can be explicitly cast
+const reverse_it: i32 = i32::{num};
 
 type NumRef = &Num;

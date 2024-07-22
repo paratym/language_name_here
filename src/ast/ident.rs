@@ -1,13 +1,13 @@
 use crate::{
     ast::{AstNode, ParseResult},
-    tok::{SrcToken, Token, Tokenizer},
+    tok::{Token, Tokenizer},
 };
 use std::{io::BufRead, rc::Rc, sync::Arc};
 
 use super::{first_match, first_match_chain};
 
 #[derive(Debug)]
-pub enum ScopeAlias {
+pub enum GlobalScope {
     Pkg,
     Mod,
     Std,
@@ -31,7 +31,7 @@ pub struct IdentExecPath {
 
 #[derive(Debug)]
 pub enum Ident {
-    Scope(ScopeAlias),
+    Global(GlobalScope),
     Alias(Alias),
     EvalPath {
         rcv: Rc<Self>,
@@ -43,7 +43,7 @@ pub enum Ident {
     },
 }
 
-impl AstNode for ScopeAlias {
+impl AstNode for GlobalScope {
     fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
         let scope = match tok.peek()? {
             Some(Token::Pkg) => Self::Pkg,
@@ -95,25 +95,25 @@ impl AstNode for IdentExecPath {
 
 impl AstNode for Ident {
     fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
-        let rcv = first_match!(tok, Self, ScopeAlias, Alias);
-        let mut expr = match rcv {
-            Some(expr) => expr,
+        let rcv = first_match!(tok, Self, GlobalScope, Alias);
+        let mut ident = match rcv {
+            Some(ident) => ident,
             None => return Ok(None),
         };
 
         loop {
-            let path = first_match_chain!(tok, Self, expr, IdentEvalPath, IdentExecPath);
+            let path = first_match_chain!(tok, Self, ident, IdentEvalPath, IdentExecPath);
             match path {
-                (true, path) => expr = path,
-                (false, expr) => return Ok(expr.into()),
+                (true, path) => ident = path,
+                (false, ident) => return Ok(ident.into()),
             }
         }
     }
 }
 
-impl From<ScopeAlias> for Ident {
-    fn from(value: ScopeAlias) -> Self {
-        Self::Scope(value)
+impl From<GlobalScope> for Ident {
+    fn from(value: GlobalScope) -> Self {
+        Self::Global(value)
     }
 }
 

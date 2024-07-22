@@ -1,9 +1,9 @@
 use crate::{
     ast::{
         first_match, Alias, AliasEval, AstNode, Expr, Ident, IdentExecPath, ParseErr, ParseResult,
-        Stmt, Vis,
+        Vis,
     },
-    tok::{SrcToken, Token, Tokenizer},
+    tok::{Token, Tokenizer},
 };
 use std::io::BufRead;
 
@@ -34,7 +34,8 @@ pub struct ArrayLit {
 
 #[derive(Debug)]
 pub enum StructField {
-    VisDef(Vis),
+    Vis(Vis),
+    Key(Expr),
     Inherit(IdentExecPath),
     Spread(SpreadExpr),
     Def {
@@ -155,11 +156,17 @@ impl AstNode for StructField {
             return Ok(field.into());
         }
 
+        if tok.next_is(&Token::Key)? {
+            tok.expect(&Token::Key)?;
+            let expr = Expr::expect(tok)?;
+            return Ok(Some(Self::Key(expr)));
+        }
+
         let vis = Vis::parse(tok)?;
         if tok.next_is(&Token::Asterisk)? {
             if let Some(vis) = vis {
                 tok.expect(&Token::Asterisk)?;
-                return Ok(Self::VisDef(vis).into());
+                return Ok(Self::Vis(vis).into());
             }
         }
 

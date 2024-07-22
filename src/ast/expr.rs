@@ -1,8 +1,8 @@
 use crate::{
     ast::{
         first_match, first_match_chain, Alias, ArrayLit, ArrayType, AstNode, BoolLit, CharLit,
-        DerefExpr, ExecScope, FnType, NumLit, ParseResult, PrimitiveType, RefExpr, RefType,
-        ScopeAlias, StrLit, StructDef, UnionType,
+        DerefExpr, ExecScope, FnType, GlobalScope, NumLit, ParseResult, PrimitiveType, RefExpr,
+        RefType, StrLit, StructDef, UnionType,
     },
     tok::{Token, Tokenizer},
 };
@@ -24,7 +24,7 @@ pub enum ExecPath {
 
 #[derive(Debug)]
 pub enum CallExpr {
-    Arg(ExecScope),
+    Scope(ExecScope),
     Array(ArrayLit),
     Struct(StructDef),
 }
@@ -32,7 +32,7 @@ pub enum CallExpr {
 #[derive(Debug)]
 pub enum Expr {
     Scope(ExecScope),
-    ScopeAlias(ScopeAlias),
+    Global(GlobalScope),
     Alias(Alias),
     EvalPath { rcv: Rc<Expr>, path: Rc<EvalPath> },
     ExecPath { rcv: Rc<Expr>, path: ExecPath },
@@ -120,7 +120,7 @@ impl AstNode for CallExpr {
 
 impl From<ExecScope> for CallExpr {
     fn from(value: ExecScope) -> Self {
-        Self::Arg(value)
+        Self::Scope(value)
     }
 }
 
@@ -142,7 +142,7 @@ impl AstNode for Expr {
             tok,
             Self,
             ExecScope,
-            ScopeAlias,
+            GlobalScope,
             Alias,
             BoolLit,
             NumLit,
@@ -179,9 +179,9 @@ impl From<ExecScope> for Expr {
     }
 }
 
-impl From<ScopeAlias> for Expr {
-    fn from(value: ScopeAlias) -> Self {
-        Self::ScopeAlias(value)
+impl From<GlobalScope> for Expr {
+    fn from(value: GlobalScope) -> Self {
+        Self::Global(value)
     }
 }
 

@@ -85,26 +85,38 @@ impl<R: BufRead> Tokenizer<R> {
             }
         };
 
-        let pos = self.pos;
-        if let Some(tok) = self.read_lex()? {
-            return Ok(Some(SrcToken { tok, pos }));
+        let pos = *self.pos();
+        if let Some(Token::Alias(alias)) = self.read_alias()? {
+            let tok = LEX_TOKENS
+                .get_by_right(alias.as_ref())
+                .cloned()
+                .unwrap_or(Token::Alias(alias));
+
+            return Ok(Some(SrcToken { pos, tok }));
         }
 
-        let tok = match ch {
+        if let Some(tok) = self.read_lex()? {
+            return Ok(Some(SrcToken { pos, tok }));
+        }
+
+        let token = match ch {
             '#' => self.read_comment(),
             '"' => self.read_str_lit(),
             '\'' => self.read_char_lit(),
-            '+' | '-' => self.read_num_lit(),
-            ch if ch.is_ascii_digit() => self.read_num_lit(),
-            '_' => self.read_alias(),
-            ch if ch.is_ascii_alphabetic() => self.read_alias(),
-            ch => {
+            ch if matches!(ch, '+' | '-') || ch.is_ascii_digit() => self.read_num_lit(),
+            ch if matches!(ch, '_') || ch.is_ascii_alphabetic() => self.read_alias(),
+            _ => Ok(None),
+        }?;
+
+        let tok = match token {
+            Some(tok) => tok,
+            None => {
                 return Err(TokErr::Syntax {
                     pos,
-                    msg: format!("unexpected character '{}'", ch),
-                })
+                    msg: format!("unrecognized character {}", ch),
+                });
             }
-        }?;
+        };
 
         Ok(Some(SrcToken { tok, pos }))
     }
@@ -146,13 +158,10 @@ impl<R: BufRead> Tokenizer<R> {
         }
     }
 
-    fn read_comment(&mut self) -> TokResult<Token> {
+    fn read_comment(&mut self) -> TokResult<Option<Token>> {
         let buf = self.peek_buf()?;
         if buf.as_bytes().first() != Some(&b'#') {
-            return Err(TokErr::Syntax {
-                pos: self.pos,
-                msg: "expected comment".into(),
-            });
+            return Ok(None);
         }
 
         let mut comment = String::new();
@@ -160,10 +169,10 @@ impl<R: BufRead> Tokenizer<R> {
         self.pos.line += 1;
         self.pos.column = 0;
 
-        Ok(Token::Comment(comment.into()))
+        Ok(Some(Token::Comment(comment.into())))
     }
 
-    fn read_alias(&mut self) -> TokResult<Token> {
+    fn read_alias(&mut self) -> TokResult<Option<Token>> {
         let mut alias = String::new();
         loop {
             let buf = self.peek_buf()?;
@@ -176,8 +185,8 @@ impl<R: BufRead> Tokenizer<R> {
                 .char_indices()
                 .find(|(i, c)| {
                     !(*c == '_'
-                        || c.is_alphabetic()
-                        || ((*i > 0 || !alias.is_empty()) && c.is_numeric()))
+                        || c.is_ascii_alphabetic()
+                        || ((*i > 0 || !alias.is_empty()) && c.is_ascii_digit()))
                 })
                 .map(|x| x.0)
                 .unwrap_or(buf_byte_len);
@@ -191,34 +200,32 @@ impl<R: BufRead> Tokenizer<R> {
             }
         }
 
-        if alias.is_empty() {
-            return Err(TokErr::Syntax {
-                pos: self.pos,
-                msg: "expected alias".into(),
-            });
-        }
-
-        Ok(Token::Alias(alias.into()))
+        Ok(if !alias.is_empty() {
+            Some(Token::Alias(alias.into()))
+        } else {
+            None
+        })
     }
 
-    fn read_str_lit(&mut self) -> TokResult<Token> {
+    fn read_str_lit(&mut self) -> TokResult<Option<Token>> {
         let mut escaped = true;
-
         let mut lit = String::new();
+
         loop {
             let buf = self.peek_buf()?;
             let buf_byte_len = buf.len();
-            if buf_byte_len == 0 {
-                break;
-            } else if lit.is_empty() && buf.as_bytes().first() != Some(&b'"') {
+            if lit.is_empty() && buf.as_bytes().first() != Some(&b'"') {
+                return Ok(None);
+            } else if buf_byte_len == 0 {
                 return Err(TokErr::Syntax {
-                    pos: self.pos,
-                    msg: "expected string literal".into(),
+                    pos: *self.pos(),
+                    msg: "".into(),
                 });
             }
 
-            let mut offset = SrcPosition::default();
+            let mut closed = false;
             let mut end_i = buf_byte_len;
+            let mut offset = SrcPosition::default();
 
             for (i, c) in buf.char_indices() {
                 if c == '\n' {
@@ -228,7 +235,8 @@ impl<R: BufRead> Tokenizer<R> {
                     offset.column += 1;
                 }
 
-                if c == '"' && !escaped {
+                if c == '"' && !escaped && (lit.len() + i > 0) {
+                    closed = true;
                     end_i = i + 1;
                     break;
                 }
@@ -238,43 +246,45 @@ impl<R: BufRead> Tokenizer<R> {
 
             lit.push_str(&buf[..end_i]);
             self.reader.consume(end_i);
-            self.pos.line += offset.line;
-            self.pos.column += offset.column;
+            self.pos += offset;
 
-            if end_i < buf_byte_len {
+            if closed {
                 break;
             }
         }
 
-        Ok(Token::StrLit(lit.into()))
+        Ok(Some(Token::StrLit(lit.into())))
     }
 
-    fn read_char_lit(&mut self) -> TokResult<Token> {
+    fn read_char_lit(&mut self) -> TokResult<Option<Token>> {
         let mut escaped = true;
-
         let mut lit = String::new();
+
         loop {
             let buf = self.peek_buf()?;
             let buf_byte_len = buf.len();
-            if buf_byte_len == 0 {
-                break;
-            } else if lit.is_empty() && buf.as_bytes().first() != Some(&b'\'') {
+            if lit.is_empty() && buf.as_bytes().first() != Some(&b'\'') {
+                return Ok(None);
+            } else if buf_byte_len == 0 {
                 return Err(TokErr::Syntax {
-                    pos: self.pos,
-                    msg: "expected character literal".into(),
+                    pos: *self.pos(),
+                    msg: "".into(),
                 });
             }
 
+            let mut closed = false;
             let mut end_i = buf_byte_len;
+
             for (i, c) in buf.char_indices() {
-                if c == '\'' && !escaped {
+                if c == '\'' && !escaped && (lit.len() + i > 0) {
+                    closed = true;
                     end_i = i + 1;
                     break;
-                } else if c == '\n' {
-                    self.reader.consume(i);
-                    self.pos.column += i;
+                }
+
+                if c.is_whitespace() {
                     return Err(TokErr::Syntax {
-                        msg: "unexpected new line".into(),
+                        msg: "unexpected whitespace in character literal".into(),
                         pos: self.pos,
                     });
                 }
@@ -286,21 +296,21 @@ impl<R: BufRead> Tokenizer<R> {
             self.reader.consume(end_i);
             self.pos.column += end_i;
 
-            if end_i < buf_byte_len {
+            if closed {
                 break;
             }
         }
 
-        Ok(Token::CharLit(lit.into()))
+        Ok(Some(Token::CharLit(lit.into())))
     }
 
-    fn read_num_lit(&mut self) -> TokResult<Token> {
+    fn read_num_lit(&mut self) -> TokResult<Option<Token>> {
         let mut signed = false;
         let mut float = false;
         let mut first_digit = NULL_CH;
         let mut base_ch = NULL_CH;
-
         let mut lit = String::new();
+
         loop {
             let buf = self.peek_buf()?;
             let buf_byte_len = buf.len();
@@ -320,7 +330,7 @@ impl<R: BufRead> Tokenizer<R> {
                     continue;
                 }
 
-                if (c == '+' || c == '-') && first_digit == NULL_CH {
+                if matches!(c, '+' | '-') && first_digit == NULL_CH {
                     if !is_valid_digit(base_ch, chars.peek().unwrap_or(&(0, NULL_CH)).1) {
                         return Err(TokErr::Syntax {
                             pos: self.pos,
@@ -374,7 +384,7 @@ impl<R: BufRead> Tokenizer<R> {
             });
         }
 
-        Ok(Token::NumLit(lit.into()))
+        Ok(Some(Token::NumLit(lit.into())))
     }
 
     fn read_lex(&mut self) -> TokResult<Option<Token>> {

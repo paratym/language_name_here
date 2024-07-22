@@ -2,6 +2,7 @@ use bimap::BiMap;
 use lazy_static::lazy_static;
 use std::{
     fmt::{self, Display},
+    ops::{Add, AddAssign},
     sync::Arc,
 };
 
@@ -51,6 +52,7 @@ pub enum Token {
     LParen,
     Rparen,
     Union,
+    Key,
     Colon,
     Comma,
     Dot,
@@ -66,6 +68,8 @@ pub enum Token {
     Arrow,
     LCurlyBrace,
     RCurlyBrace,
+    // Self,
+    Arg,
     Return,
     Defer,
     If,
@@ -134,6 +138,7 @@ lazy_static! {
         map.insert(Token::LParen, "(");
         map.insert(Token::Rparen, ")");
         map.insert(Token::Union, "union");
+        map.insert(Token::Key, "key");
         map.insert(Token::Colon, ":");
         map.insert(Token::Comma, ",");
         map.insert(Token::Dot, ".");
@@ -149,6 +154,7 @@ lazy_static! {
         map.insert(Token::Arrow, "->");
         map.insert(Token::LCurlyBrace, "{");
         map.insert(Token::RCurlyBrace, "}");
+        // map.insert(Token::Arg, "arg");
         map.insert(Token::Return, "return");
         map.insert(Token::Defer, "defer");
         map.insert(Token::If, "if");
@@ -177,6 +183,17 @@ impl Display for Token {
             Self::StrLit(val) => write!(f, "\"{}\"", val),
             Self::NumLit(val) => f.write_str(val),
             _ => f.write_str(LEX_TOKENS.get_by_left(self).ok_or(fmt::Error)?),
+        }
+    }
+}
+
+impl AddAssign for SrcPosition {
+    fn add_assign(&mut self, rhs: Self) {
+        self.line += rhs.line;
+        if rhs.line > 0 {
+            self.column = rhs.column;
+        } else {
+            self.column += rhs.column;
         }
     }
 }

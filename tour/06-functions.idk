@@ -3,7 +3,11 @@ fn do_nothing {} # functions can be defined using the 'fn' keyword
 fn the_same_signature: () -> () {} # the signature can be passed explicitly
 # if it is omitted it is assumed to be '() -> ()'
 
-fn with_an_arg: i32::{arg_name} -> () { # all functions have exactly one argument, and one return type
+fn with_an_arg: i32 -> i32 { # all functions have exactly one argument, and one return type
+	arg # the argument can be referenced using the 'arg' keyword
+}
+
+fn named_arg: i32::{arg_name} -> () { # the argument can be renamed using destructuring syntax
 	# if no value is returned it is assumed to be '()'
 }
 
@@ -18,14 +22,16 @@ fn multiple_returns: () -> (a: i32, b: i32) { # same for the return value
 }
 
 type Args = (a: i32, b: i32);
-fn named_args: Args::(a, b) -> () {}
+fn named_args: Args::(a, b) -> () {
+
+}
 
 fn calling_rules {
 	do_nothing(); # functions can be called by passing the argument 
-	with_an_arg(0); # primitive arguments can be passed using parentheses
-	compound_args(a = 0, b = 0); # no extra parentheses are required for passing structs
+	with_an_arg{0}; # arguments can be passed using curly braces
+	compound_args(a = 0, b = 0); # no extra braces are required for passing structs
 	named_args(a = 0, b = 0); # argument type can be inferred
-	named_args(Args::(a = 0, b = 0)); # the same as the previous call
+	named_args{Args::(a = 0, b = 0)}; # the same as the previous call
 }
 
 ### methods ###
@@ -48,16 +54,9 @@ fn Thingy::do_nothing: i32::(arg) -> () { # the reciever cn be omitted entirely.
 	# self.leak_secret(); # error: self is never assigned
 }
 
-fn u8::negative: Self -> () -> u16 { # methods can be declared on arbitrary types, but must be explicitly imported
-	u16::(self).product(-1)
-}
-
 fn calling_methods {
-	let thingy = Thingy::new();
-	let secret1 = thingy.&.leak_secret(); # auto deref sounds hard
+	let thingy = Thingy::new{0};
+	let secret1 = thingy.&.leak_secret(); # auto (de)ref sounds hard
 	let secret2 = thingy.leak_secret();
-	Thingy::do_nothing(0);
-
-	let int: u8 = 255;
-	int.negative();
+	Thingy::do_nothing{0};
 }

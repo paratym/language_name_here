@@ -4,6 +4,8 @@ use crate::{
 };
 use std::{io::BufRead, rc::Rc};
 
+use super::CallExpr;
+
 #[derive(Debug)]
 pub struct AssignStmt {
     pub rhs: Expr,
@@ -20,12 +22,12 @@ pub enum UnaryOp {
 #[derive(Debug)]
 pub struct UnaryStmt {
     pub op: UnaryOp,
-    pub rhs: Expr,
+    pub rhs: Option<Expr>,
 }
 
 #[derive(Debug)]
 pub struct IfStmt {
-    pub cond: Expr,
+    pub cond: Rc<Expr>,
     pub body: ExecScope,
     pub chain: Option<ElseStmt>,
 }
@@ -38,7 +40,7 @@ pub enum ElseStmt {
 
 #[derive(Debug)]
 pub struct WhileStmt {
-    pub cond: Expr,
+    pub cond: Rc<Expr>,
     pub body: ExecScope,
 }
 
@@ -90,13 +92,12 @@ impl AstNode for UnaryOp {
 
 impl AstNode for UnaryStmt {
     fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
-        let op = if let Some(op) = UnaryOp::parse(tok)? {
-            op
-        } else {
-            return Ok(None);
+        let op = match UnaryOp::parse(tok)? {
+            Some(op) => op,
+            None => return Ok(None),
         };
 
-        let rhs = Expr::expect(tok)?;
+        let rhs = Expr::parse(tok)?;
         tok.expect(&Token::Semicolon)?;
 
         Ok(Some(Self { op, rhs }))
@@ -110,10 +111,20 @@ impl AstNode for IfStmt {
         }
 
         tok.expect(&Token::If)?;
-        let cond = Expr::expect(tok)?;
-        let body = ExecScope::expect(tok)?;
-        let chain = ElseStmt::parse(tok)?;
+        let (cond, body) = match Expr::expect(tok)? {
+            Expr::Call {
+                rcv,
+                arg: CallExpr::Scope(body),
+            } => (rcv, body),
+            _ => {
+                return Err(ParseErr::Syntax {
+                    pos: *tok.pos(),
+                    msg: "expected scope".into(),
+                })
+            }
+        };
 
+        let chain = ElseStmt::parse(tok)?;
         Ok(Some(Self { cond, body, chain }))
     }
 }
@@ -145,8 +156,18 @@ impl AstNode for WhileStmt {
         }
 
         tok.expect(&Token::While)?;
-        let cond = Expr::expect(tok)?;
-        let body = ExecScope::expect(tok)?;
+        let (cond, body) = match Expr::expect(tok)? {
+            Expr::Call {
+                rcv,
+                arg: CallExpr::Scope(body),
+            } => (rcv, body),
+            _ => {
+                return Err(ParseErr::Syntax {
+                    pos: *tok.pos(),
+                    msg: "expected scope".into(),
+                })
+            }
+        };
 
         Ok(Some(Self { cond, body }))
     }
@@ -194,7 +215,13 @@ impl AstNode for Stmt {
             _ => return Ok(base),
         };
 
-        Ok(Some(first_match_chain!(tok, Self, expr, AssignStmt,).1))
+        if let Some(stmt) = AssignStmt::parse(tok)? {
+            return Ok(Some(Self::from((expr, stmt))));
+        } else if tok.next_is(&Token::Semicolon)? {
+            tok.expect(&Token::Semicolon)?;
+        }
+
+        Ok(Some(Self::from(expr)))
     }
 }
 

@@ -1,7 +1,7 @@
 use crate::{
     ast::{
-        first_match, Alias, AstNode, EvalScope, ExecScope, Expr, Ident, ParseErr, ParseResult,
-        ScopeAlias, Stmt,
+        first_match, Alias, AstNode, CallExpr, ExecScope, Expr, GlobalScope, Ident, ParseErr,
+        ParseResult,
     },
     tok::{Token, Tokenizer},
 };
@@ -15,14 +15,14 @@ pub enum Access {
 
 #[derive(Debug)]
 pub struct Vis {
-    pub scope: Option<ScopeAlias>,
+    pub scope: Option<GlobalScope>,
     pub access: Option<Access>,
 }
 
 #[derive(Debug)]
 pub struct VisDecl {
     pub vis: Vis,
-    pub stmt: Rc<Stmt>,
+    pub decl: Rc<Decl>,
 }
 
 #[derive(Debug)]
@@ -42,46 +42,18 @@ pub struct AliasDecl {
 }
 
 #[derive(Debug)]
-pub struct FnSigDecl {
-    pub rcv: Option<Expr>,
-    pub arg: Expr,
-    pub ret: Expr,
+pub enum ScopeEval {
+    Fn,
+    Iface,
+    Mod,
 }
 
 #[derive(Debug)]
-pub struct FnDecl {
+pub struct ScopeAliasDecl {
+    pub eval: ScopeEval,
     pub ident: Ident,
-    pub sig: Option<FnSigDecl>,
-    pub body: Option<ExecScope>,
-}
-
-#[derive(Debug)]
-pub struct EnumVarDecl {
-    pub ident: Ident,
-    pub key: Option<Expr>,
-    pub typ: Option<Expr>,
-    pub val: Option<Expr>,
-}
-
-// #[derive(Debug)]
-// pub struct EnumDecl {
-//     pub ident: Ident,
-//     pub typ: Option<Expr>,
-//     pub vars: Vec<EnumVarDecl>,
-// }
-
-#[derive(Debug)]
-pub struct IfaceDecl {
-    pub ident: Ident,
-    pub typ: Option<Expr>,
-    pub scope: EvalScope,
-}
-
-#[derive(Debug)]
-pub struct ModDecl {
-    pub ident: Ident,
-    pub typ: Option<Expr>,
-    pub scope: Option<EvalScope>,
+    pub bounds: Option<Rc<Expr>>,
+    pub scope: Option<ExecScope>,
 }
 
 #[derive(Debug)]
@@ -97,9 +69,7 @@ pub enum Annotation {
 pub enum Decl {
     Vis(VisDecl),
     Alias(AliasDecl),
-    Fn(FnDecl),
-    Iface(IfaceDecl),
-    Mod(ModDecl),
+    Scope(ScopeAliasDecl),
     Use(UseDecl),
     Annotation(Rc<Annotation>),
 }
@@ -136,7 +106,7 @@ impl AstNode for Vis {
 
             match tok.peek()? {
                 Some(Token::Pkg | Token::Mod) if scope.is_none() => {
-                    scope = ScopeAlias::expect(tok)?.into()
+                    scope = GlobalScope::expect(tok)?.into()
                 }
                 Some(Token::Get | Token::Set) if access.is_none() => {
                     access = Access::expect(tok)?.into()
@@ -160,8 +130,8 @@ impl AstNode for VisDecl {
             return Ok(None);
         };
 
-        let stmt = Stmt::expect(tok)?.into();
-        Ok(Some(Self { vis, stmt }))
+        let decl = Decl::expect(tok)?.into();
+        Ok(Some(Self { vis, decl }))
     }
 }
 
@@ -182,10 +152,9 @@ impl AstNode for AliasEval {
 
 impl AstNode for AliasDecl {
     fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
-        let eval = if let Some(eval) = AliasEval::parse(tok)? {
-            eval
-        } else {
-            return Ok(None);
+        let eval = match AliasEval::parse(tok)? {
+            Some(eval) => eval,
+            None => return Ok(None),
         };
 
         let ident = Ident::expect(tok)?;
@@ -213,98 +182,63 @@ impl AstNode for AliasDecl {
     }
 }
 
-impl AstNode for FnSigDecl {
+impl AstNode for ScopeEval {
     fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
-        let one = if let Some(slot) = Expr::parse(tok)? {
-            slot
-        } else {
-            return Ok(None);
+        let eval = match tok.peek()? {
+            Some(Token::Fn) => Self::Fn,
+            Some(Token::Iface) => Self::Iface,
+            Some(Token::Mod) => Self::Mod,
+            _ => return Ok(None),
         };
 
-        tok.expect(&Token::Arrow)?;
-        let two = Expr::expect(tok)?;
-        if !tok.next_is(&Token::Arrow)? {
-            return Ok(Some(Self {
-                rcv: None,
-                arg: one,
-                ret: two,
-            }));
+        tok.next_tok()?;
+        Ok(Some(eval))
+    }
+}
+
+impl AstNode for ScopeAliasDecl {
+    fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
+        let eval = match ScopeEval::parse(tok)? {
+            Some(eval) => eval,
+            None => return Ok(None),
+        };
+
+        let ident = Ident::expect(tok)?;
+        let bound = tok.next_is(&Token::Colon)?;
+        if bound {
+            tok.expect(&Token::Colon)?;
         }
 
-        tok.expect(&Token::Arrow)?;
+        let (bounds, scope) = match Expr::parse(tok)? {
+            Some(Expr::Call {
+                rcv,
+                arg: CallExpr::Scope(scope),
+            }) if bound => (rcv.into(), scope.into()),
+            Some(expr) if bound => (Some(expr.into()), None),
+            Some(Expr::Scope(scope)) if !bound => (None, scope.into()),
+            None if !bound => (None, None),
+            _ => {
+                return Err(ParseErr::Syntax {
+                    pos: *tok.pos(),
+                    msg: if bound {
+                        "expected expression".into()
+                    } else {
+                        "expected scope".into()
+                    },
+                })
+            }
+        };
+
+        if tok.next_is(&Token::Semicolon)? {
+            tok.expect(&Token::Semicolon)?;
+        }
+
         Ok(Some(Self {
-            rcv: one.into(),
-            arg: two,
-            ret: Expr::expect(tok)?,
+            eval,
+            ident,
+            bounds,
+            scope,
         }))
-    }
-}
-
-impl AstNode for FnDecl {
-    fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
-        if !tok.next_is(&Token::Fn)? {
-            return Ok(None);
-        }
-
-        tok.expect(&Token::Fn)?;
-        let ident = Ident::expect(tok)?;
-        let sig = if tok.next_is(&Token::Colon)? {
-            tok.expect(&Token::Colon)?;
-            FnSigDecl::expect(tok)?.into()
-        } else {
-            None
-        };
-
-        let body = ExecScope::parse(tok)?;
-        if body.is_none() {
-            tok.expect(&Token::Semicolon)?;
-        }
-
-        Ok(Some(Self { ident, sig, body }))
-    }
-}
-
-impl AstNode for IfaceDecl {
-    fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
-        if !tok.next_is(&Token::Iface)? {
-            return Ok(None);
-        }
-
-        tok.expect(&Token::Iface)?;
-        let ident = Ident::expect(tok)?;
-        let typ = if tok.next_is(&Token::Colon)? {
-            tok.expect(&Token::Colon)?;
-            Expr::expect(tok)?.into()
-        } else {
-            None
-        };
-
-        let scope = EvalScope::expect(tok)?;
-        Ok(Some(Self { ident, typ, scope }))
-    }
-}
-
-impl AstNode for ModDecl {
-    fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
-        if !tok.next_is(&Token::Mod)? {
-            return Ok(None);
-        }
-
-        tok.expect(&Token::Mod)?;
-        let ident = Ident::expect(tok)?;
-        let typ = if tok.next_is(&Token::Colon)? {
-            tok.expect(&Token::Colon)?;
-            Expr::expect(tok)?.into()
-        } else {
-            None
-        };
-
-        let scope = EvalScope::parse(tok)?;
-        if scope.is_none() {
-            tok.expect(&Token::Semicolon)?;
-        };
-
-        Ok(Some(Self { ident, typ, scope }))
     }
 }
 
@@ -334,7 +268,12 @@ impl AstNode for Annotation {
 impl AstNode for Decl {
     fn parse(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Option<Self>> {
         Ok(first_match!(
-            tok, Self, VisDecl, AliasDecl, FnDecl, IfaceDecl, ModDecl, Annotation
+            tok,
+            Self,
+            VisDecl,
+            AliasDecl,
+            ScopeAliasDecl,
+            Annotation
         ))
     }
 }
@@ -351,21 +290,9 @@ impl From<AliasDecl> for Decl {
     }
 }
 
-impl From<FnDecl> for Decl {
-    fn from(value: FnDecl) -> Self {
-        Self::Fn(value)
-    }
-}
-
-impl From<IfaceDecl> for Decl {
-    fn from(value: IfaceDecl) -> Self {
-        Self::Iface(value)
-    }
-}
-
-impl From<ModDecl> for Decl {
-    fn from(value: ModDecl) -> Self {
-        Self::Mod(value)
+impl From<ScopeAliasDecl> for Decl {
+    fn from(value: ScopeAliasDecl) -> Self {
+        Self::Scope(value)
     }
 }
 

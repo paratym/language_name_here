@@ -36,7 +36,7 @@ fn parse_scope<N: AstNode>(tok: &mut Tokenizer<impl BufRead>) -> ParseResult<Opt
         return Ok(None);
     }
 
-    tok.expect(&Token::LCurlyBrace);
+    tok.expect(&Token::LCurlyBrace)?;
     let mut items = Vec::new();
 
     loop {

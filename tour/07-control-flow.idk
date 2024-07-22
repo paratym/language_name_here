@@ -1,50 +1,50 @@
-enum IntPlusPlus { # a surprise tool that will help us later
-	I: i64,
-	U: u64
-}
+# enum IntPlusPlus { # a surprise tool that will help us later
+# 	I: i64,
+# 	U: u64
+# }
 
 fn control_flow: () -> u64 {
 	if false { # you've seen if/else statements before
 	} else if false {
 	} else {}
 
-	let x = if false { 0 } else { -1 };
+	# let x = if false { 0 } else { -1 };
 	# if statements where all branches deverge or resolve to a value can be used on the rhs of an assignment
 
-	let int = IntPlusPlus::I::(x);
-	if let IntPlusPlus::U::(unsigned) = int { # destructuring variants can be used as a condition
-		return unsigned;
-	} else if let IntPlusPlus::I::(signed) = int; signed.gt_eq(0) { # destructuring can be combined with a boolean
-		return signed.try_into(); # 'try_into' is not cannon, just for example
-	} else let IntPlusPlus::I::(negative) = int; 
+	let int = IntPlusPlus::I::{x};
+	# if let IntPlusPlus::U::(unsigned) = int { # destructuring variants can be used as a condition
+	#	return unsigned;
+	# } else if let IntPlusPlus::I::(signed) = int; signed.gt_eq(0) { # destructuring can be combined with a boolean
+	#	return signed.try_into(); # 'try_into' is not cannon, just for example
+	# } else let IntPlusPlus::I::(negative) = int; 
 	# if all other variants diverge the remaining variant can be destructured and the else block can be omitted
 
-	match int { # match is only for enums for now
-		IntPlusPlus::U::(unsigned) -> return unsigned,
-		IntPlusPlus::I::(signed) -> {
+	# match int { # match is only for enums for now
+		# IntPlusPlus::U::(unsigned) -> return unsigned,
+		# IntPlusPlus::I::(signed) -> {
 			# branches can be blocks
-		}
-	}
+		# }
+	# }
 
 	# match statements where all branches diverge or resolve to a value can be used on the rhs of an assignment
-	let also_negative = match int {
-		IntPlusPlus::U::(unsigned) -> 0,
-		IntPlusPlus::I::(signed) -> signed
-	};
+	# let also_negative = match int {
+		# IntPlusPlus::U::(unsigned) -> 0,
+		# IntPlusPlus::I::(signed) -> signed
+	# };
 
-	defer negative.sum(1); # execute statement before scope returns
+	defer negative.sum{1}; # execute statement before scope returns
 	defer {
 		# defer can be used with a block
-	}
+	};
 
 	while false {} # you've also seen while loops before
 
 	let index_iter = Iter::increment(to = 5);
-	while let Maybe::Some::(i) = index_iter.next() {
-		if i < 2 {
+	# while let Maybe::Some::(i) = index_iter.next() {
+		if i.lt{2} {
 			continue;
 		} else {
 			break;
 		}
-	}
+	# }
 }

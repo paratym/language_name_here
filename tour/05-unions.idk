@@ -11,16 +11,17 @@ fn inferred_union {
 	heading = (east = 20);
 	heading = (south = 15);
 	heading = (west = 30);
-	# heading = (north = 10, east = 15) # error: type of heading cannot be inferred
+	# heading = (north = 10, east = 15); # error: type of heading cannot be inferred
 
-	# the type of heading is inferred as the union of the anonymous struct
-	# (north: i32, east: i32, south: i32, west: i32)
+	# the type of heading is inferred as 
+	# union (north: i32, east: i32, south: i32, west: i32)
 }
 
 type AStructure = (
 	pub *,
-	one: u32,
-	two: u32,
+	key u16, # the type used for the key can be explicitly set to any integer type
+	# one = 1: u32, # the key for a value can be explicitly set
+	two: u32 = 2, # variants can be given default values
 );
 
 type Onion = union AStructure; # union of a named type
