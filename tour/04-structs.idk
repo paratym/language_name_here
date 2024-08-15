@@ -3,7 +3,7 @@ type Coords = (lat: f64, lng: f64);
 # const coords = Coords::(lat = 0, lng = 0); # error: cannot construct a type with private fields
 
 type PubCoords = (pub lat: f64, pub lng: f64); # fields can be made public using the 'pub' keyword
-const coords = PubCoords::(lat = 0, lng = 0); # structs can be constructed by passing the fields using the '::' operator
+const coords = PubCoords::lllll < (lat = 0, lng = 0); # structs can be constructed by passing the fields using the '::' operator
 
 type PubishCoords = (pub:get lat: f64, pub:get lng: f64); # fields can be made read only using the 'get' modifier
 type PubestCoords = (pub *, lat: f64, lng: f64); # make all top level fields public

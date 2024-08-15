@@ -1,4 +1,6 @@
-fn variables { # variables cannot be declared in the top level scope
+fn variables {
+	# variables cannot be declared in the top level scope
+
 	let var_name = 0;
 	# var_name = 1; # error: variables declared with 'let' are immutable
 
@@ -9,8 +11,8 @@ fn variables { # variables cannot be declared in the top level scope
 	# the default numeric type is i32 or f32
 
 	const not_var = 0; # aliases declared with 'const' are evaluated at compile time
-	const reference = not_var.&;
-	const dereference = reference.*;
+	const reference = not_var&;
+	const dereference = reference*;
 }
 
 const global_alias = 0; # constants can be declared in the top level scope

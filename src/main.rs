@@ -1,10 +1,12 @@
-use io::{FsImporter, Importer};
+mod parser;
 
-pub mod ast;
-pub mod io;
-pub mod tok;
+use parser::{Parser, Rule};
+use pest::{error::Error, Parser as _};
 
-fn main() {
-    let mut importer = FsImporter::new("./tour");
-    importer.import_path(&"./".into()).unwrap();
+fn main() -> Result<(), Error<parser::Rule>> {
+    let tt = Parser::parse(Rule::src, include_str!("../tour/01-variables.idk"))?;
+    let tlist = tt.flatten().tokens().collect::<Vec<_>>();
+    println!("{tlist:?}");
+
+    Ok(())
 }

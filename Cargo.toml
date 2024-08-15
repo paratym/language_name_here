@@ -5,6 +5,7 @@ edition = "2021"
 
 
 [dependencies]
-bimap = "0.6.3"
 cranelift = "0.109.0"
 lazy_static = "1.4.0"
+pest = "2.7.11"
+pest_derive = "2.7.11"

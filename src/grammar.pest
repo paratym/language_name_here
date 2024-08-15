@@ -1,0 +1,87 @@
+WHITESPACE = _{ (" " | "\t" | "\n" | "\r")+ }
+COMMENT = { "#" ~ (!NEWLINE ~ ANY)* }
+
+alias =	@{
+	("_" | "-")* ~
+	ASCII_ALPHA ~
+	(ASCII_ALPHANUMERIC | "_" | "-")*
+}
+
+// literals
+
+bool = @{ "true" | "false" }
+
+num_sep = _{ "_" }
+
+int = @{
+	"-"? ~
+	(("0d"? ~ ASCII_DIGIT ~ (ASCII_DIGIT | num_sep)*)
+	| ("0x" ~ ASCII_HEX_DIGIT ~ (ASCII_HEX_DIGIT | num_sep)*)
+	| ("0o" ~ ASCII_OCT_DIGIT ~ (ASCII_OCT_DIGIT | num_sep)*)
+	| ("0b" ~ ASCII_BIN_DIGIT ~ (ASCII_BIN_DIGIT | num_sep)*))
+}
+
+float = @{
+	"-"? ~
+	(("0d"? ~ ASCII_DIGIT ~ (ASCII_DIGIT | num_sep)* ~ "." ~ ASCII_DIGIT ~ (ASCII_DIGIT | num_sep)*)
+	| ("0x" ~ ASCII_HEX_DIGIT ~ (ASCII_HEX_DIGIT | num_sep)* ~ "." ~ ASCII_HEX_DIGIT ~ (ASCII_HEX_DIGIT | num_sep)*)
+	| ("0o" ~ ASCII_OCT_DIGIT ~ (ASCII_OCT_DIGIT | num_sep)* ~ "." ~ ASCII_OCT_DIGIT ~ (ASCII_OCT_DIGIT | num_sep)*)
+	| ("0b" ~ ASCII_BIN_DIGIT ~ (ASCII_BIN_DIGIT | num_sep)* ~ "." ~ ASCII_BIN_DIGIT ~ (ASCII_BIN_DIGIT | num_sep)*))
+}
+
+chr_esc = @{ "\\" ~ "t" | "r" | "n" | "'" | "\"" | "\\" }
+chr_content = @{ !("'" | "\\") ~ ANY }
+chr = @{ "'" ~ (chr_content | chr_esc) ~ "'" }
+
+str_content = @{ (!("\"" | "\\") ~ ANY)+ }
+str = @{ "\"" ~ (str_content | chr_esc)* ~ "\"" }
+
+literal = _{ bool | int | float | chr | str }
+
+// expressions
+
+block = {
+	"{" ~
+	((decl | stmt) ~ ";")* ~
+	expr? ~
+	"}"
+}
+
+bin_op = @{ "::" | "." | ">" | "<" }
+post_op = @{ "&" | "*" | "?" }
+
+unit_expr = _{ alias | literal | block | branch_stmt }
+expr = { unit_expr ~ post_op* ~ (bin_op ~ unit_expr ~ post_op*)* }
+
+// statements
+
+assign_stmt = { expr ~ "=" ~ expr }
+
+ctrl_op = { "return" | "defer" | "continue" | "break" }
+ctrl_stmt = { ctrl_op ~ expr? }
+
+if_stmt = { "if" ~ expr ~ block ~ else_stmt? }
+else_stmt = { "else" ~ (if_stmt | block) }
+
+while_stmt = { "while" ~ expr ~ block }
+
+branch_stmt = _{ if_stmt | while_stmt }
+
+stmt = _{ assign_stmt | ctrl_stmt | branch_stmt }
+
+// declarations
+
+alias_eval = @{
+	"let"
+	| "var"
+	| "const"
+	| "type"
+}
+
+alias_decl = { alias_eval ~ alias ~ (":" ~ expr)? ~ "=" ~ expr }
+
+fn_decl = { "fn" ~ alias ~ block }
+
+decl = _{ alias_decl | fn_decl }
+
+src = _{ SOI ~ (decl ~ ";"?)* ~ EOI }

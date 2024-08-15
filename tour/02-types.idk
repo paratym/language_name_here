@@ -13,4 +13,4 @@ const int: i32 = 0;
 const num: Num = Num::{int}; # values can be explicitly cast
 const reverse_it: i32 = i32::{num};
 
-type NumRef = &Num;
+type NumRef = Num&;
