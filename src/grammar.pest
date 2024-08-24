@@ -1,5 +1,5 @@
 WHITESPACE = _{ (" " | "\t" | "\n" | "\r")+ }
-COMMENT = { "#" ~ (!NEWLINE ~ ANY)* }
+COMMENT = _{ "#" ~ (!NEWLINE ~ ANY)* }
 
 alias =	@{
 	("_" | "-")* ~
@@ -9,79 +9,110 @@ alias =	@{
 
 // literals
 
-bool = @{ "true" | "false" }
+bool = @{ kw_true | kw_false }
+	kw_true = { "true" }
+	kw_false = { "false" }
+
+num_sign = { num_pos | num_neg }
+	num_pos = { "+" }
+	num_neg = { "-" }
+
+hex_prefix = { "0x" }
+oct_prefix = { "0o" }
+bin_prefix = { "0b" }
+dec_prefix = { "0d" }
 
 num_sep = _{ "_" }
 
-int = @{
-	"-"? ~
-	(("0d"? ~ ASCII_DIGIT ~ (ASCII_DIGIT | num_sep)*)
-	| ("0x" ~ ASCII_HEX_DIGIT ~ (ASCII_HEX_DIGIT | num_sep)*)
-	| ("0o" ~ ASCII_OCT_DIGIT ~ (ASCII_OCT_DIGIT | num_sep)*)
-	| ("0b" ~ ASCII_BIN_DIGIT ~ (ASCII_BIN_DIGIT | num_sep)*))
+hex_num = @{ ASCII_HEX_DIGIT ~ (ASCII_HEX_DIGIT | num_sep)* }
+oct_num = @{ ASCII_OCT_DIGIT ~ (ASCII_OCT_DIGIT | num_sep)* }
+bin_num = @{ ASCII_BIN_DIGIT ~ (ASCII_BIN_DIGIT | num_sep)* }
+dec_num = @{ ASCII_DIGIT ~ (ASCII_DIGIT | num_sep)* }
+
+float = ${
+	num_sign? ~ 
+	((hex_prefix ~ hex_num ~ "." ~ hex_num?)
+	| (oct_prefix ~ oct_num ~ "." ~ oct_num?)
+	| (bin_prefix ~ bin_num ~ "." ~ bin_num?)
+	| (dec_prefix? ~ dec_num ~ "." ~ dec_num?))
 }
 
-float = @{
-	"-"? ~
-	(("0d"? ~ ASCII_DIGIT ~ (ASCII_DIGIT | num_sep)* ~ "." ~ ASCII_DIGIT ~ (ASCII_DIGIT | num_sep)*)
-	| ("0x" ~ ASCII_HEX_DIGIT ~ (ASCII_HEX_DIGIT | num_sep)* ~ "." ~ ASCII_HEX_DIGIT ~ (ASCII_HEX_DIGIT | num_sep)*)
-	| ("0o" ~ ASCII_OCT_DIGIT ~ (ASCII_OCT_DIGIT | num_sep)* ~ "." ~ ASCII_OCT_DIGIT ~ (ASCII_OCT_DIGIT | num_sep)*)
-	| ("0b" ~ ASCII_BIN_DIGIT ~ (ASCII_BIN_DIGIT | num_sep)* ~ "." ~ ASCII_BIN_DIGIT ~ (ASCII_BIN_DIGIT | num_sep)*))
+int = ${
+	num_sign? ~
+	((hex_prefix ~ hex_num)
+	| (oct_prefix ~ oct_num)
+	| (bin_prefix ~ bin_num)
+	| (dec_prefix? ~ dec_num))
 }
 
-chr_esc = @{ "\\" ~ "t" | "r" | "n" | "'" | "\"" | "\\" }
+esc_lit = { "t" | "r" | "n" | "'" | "\"" | "\\" }
+esc_seq = ${ "\\" ~ esc_lit }
+
 chr_content = @{ !("'" | "\\") ~ ANY }
-chr = @{ "'" ~ (chr_content | chr_esc) ~ "'" }
+chr = ${ "'" ~ (chr_content | esc_seq) ~ "'" }
 
 str_content = @{ (!("\"" | "\\") ~ ANY)+ }
-str = @{ "\"" ~ (str_content | chr_esc)* ~ "\"" }
+str = ${ "\"" ~ (str_content | esc_seq)* ~ "\"" }
 
-literal = _{ bool | int | float | chr | str }
+literal = _{ bool | float | int | chr | str }
 
 // expressions
 
 block = {
 	"{" ~
-	((decl | stmt) ~ ";")* ~
+	(stmt ~ ";")* ~
 	expr? ~
 	"}"
 }
 
-bin_op = @{ "::" | "." | ">" | "<" }
-post_op = @{ "&" | "*" | "?" }
+bin_op = _{ eval_path | exec_path | pipe_r | pipe_l }
+	eval_path = { "::" }
+	exec_path = { "." }
+	pipe_r = { ">" }
+	pipe_l = { "<" }
 
-unit_expr = _{ alias | literal | block | branch_stmt }
+post_op = _{ reference | dereference | unwrap }
+	reference = { "&" }
+	dereference = { "*" }
+	unwrap = { "?" }
+
+unit_expr = _{ literal | alias | block | branch_stmt } 
 expr = { unit_expr ~ post_op* ~ (bin_op ~ unit_expr ~ post_op*)* }
 
 // statements
 
 assign_stmt = { expr ~ "=" ~ expr }
 
-ctrl_op = { "return" | "defer" | "continue" | "break" }
+ctrl_op = { kw_return | kw_defer | kw_continue | kw_break }
+	kw_return = { "return" }
+	kw_defer = { "defer" }
+	kw_continue = { "continue" }
+	kw_break = { "break" }
+
 ctrl_stmt = { ctrl_op ~ expr? }
 
-if_stmt = { "if" ~ expr ~ block ~ else_stmt? }
-else_stmt = { "else" ~ (if_stmt | block) }
+if_stmt = { "if" ~ expr ~ expr ~ ("else" ~ expr)? }
 
-while_stmt = { "while" ~ expr ~ block }
+while_stmt = { "while" ~ expr ~ expr }
 
 branch_stmt = _{ if_stmt | while_stmt }
 
-stmt = _{ assign_stmt | ctrl_stmt | branch_stmt }
+stmt = { assign_stmt | ctrl_stmt | branch_stmt | decl }
 
 // declarations
 
-alias_eval = @{
-	"let"
-	| "var"
-	| "const"
-	| "type"
-}
+bounds = { ":" ~ expr }
 
-alias_decl = { alias_eval ~ alias ~ (":" ~ expr)? ~ "=" ~ expr }
+alias_eval = { kw_let | kw_var | kw_const | kw_type }
+	kw_let = { "let" }
+	kw_var = { "var" }
+	kw_const = { "const" }
+	kw_type = { "type" }
 
-fn_decl = { "fn" ~ alias ~ block }
+alias_decl = { alias_eval ~ alias ~ bounds? ~ "=" ~ expr }
 
-decl = _{ alias_decl | fn_decl }
+fn_decl = { "fn" ~ alias ~ bounds? ~ block }
+
+decl = { alias_decl | fn_decl }
 
 src = _{ SOI ~ (decl ~ ";"?)* ~ EOI }

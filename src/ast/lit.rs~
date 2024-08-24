@@ -1,0 +1,135 @@
+use crate::{
+    ast::{
+        assert_exhausted, match_next, unreachable_grammar, AstBuildError, AstBuildResult, AstNode,
+    },
+    parser::{PairsExt, Rule},
+};
+use lexical::{FromLexical, NumberFormatBuilder};
+use pest::{
+    error::LineColLocation,
+    iterators::{Pair, Pairs},
+};
+use std::{ffi::CString, num::NonZeroU8};
+
+#[derive(Debug)]
+pub struct BoolLit {
+    pub val: bool,
+}
+
+#[derive(Debug)]
+pub struct NumLit {
+    pub neg: bool,
+    pub whole: u64,
+    pub frac: f64,
+}
+
+#[derive(Debug)]
+pub struct ChrLit {
+    pub val: char,
+}
+
+#[derive(Debug)]
+pub struct StrLit {
+    pub val: CString,
+}
+
+impl AstNode for BoolLit {
+    fn parse(pairs: &mut Pairs<Rule>) -> AstBuildResult<Option<Self>> {
+        let mut pairs = match_next!(pairs, Rule::bool).into_inner();
+
+        let val = match pairs.next().as_ref().map(Pair::as_rule) {
+            Some(Rule::kw_true) => true,
+            Some(Rule::kw_false) => false,
+            _ => unreachable_grammar!(Self),
+        };
+
+        assert_exhausted!(pairs, Self);
+        Ok(Some(Self { val }))
+    }
+}
+
+const NUM_FMT: NumberFormatBuilder = NumberFormatBuilder::new()
+    .digit_separator(NonZeroU8::new(b'_'))
+    .no_exponent_notation(true);
+
+const HEX_FMT: u128 = NUM_FMT.radix(16).base_prefix(NonZeroU8::new(b'x')).build();
+const OCT_FMT: u128 = NUM_FMT.radix(8).base_prefix(NonZeroU8::new(b'o')).build();
+const BIN_FMT: u128 = NUM_FMT.radix(2).base_prefix(NonZeroU8::new(b'b')).build();
+const DEC_FMT: u128 = NUM_FMT.radix(10).base_prefix(NonZeroU8::new(b'd')).build();
+
+impl AstNode for NumLit {
+    fn parse(pairs: &mut Pairs<Rule>) -> AstBuildResult<Option<Self>> {
+        let mut pair = match_next!(pairs, Rule::num);
+        let num_str = pair.as_str();
+
+        let pairs = pair.into_inner();
+
+        let neg = pairs.next_if(Rule::num_sign).is_some();
+        let radix_prefix = match pairs.peek().as_ref().map(Pair::as_rule) {
+            Some(Rule::hex_prefix) => 16,
+            Some(Rule::oct_prefix) => 8,
+            Some(Rule::bin_prefix) => 2,
+            Some(Rule::dec_prefix) => 10,
+            _ => 0,
+        };
+
+        let radix = if radix_prefix != 0 {
+            pairs.next();
+            radix_prefix
+        } else {
+            10
+        };
+
+        let whole_pos = pairs.peek().as_ref().map(Pair::line_col);
+        let whole_str = pairs
+            .next()
+            .unwrap_or_else(|| unreachable_grammar!(Self))
+            .as_str()
+            .bytes()
+            .filter(|ch| *ch != b'_')
+            .collect::<Box<_>>();
+
+        let whole = u64::from_lexical(&whole_str).map_err(|e| AstBuildError {
+            kind: e.into(),
+            pos: whole_pos.map(LineColLocation::Pos),
+        })?;
+
+        let frac_pos = pairs.peek().as_ref().map(Pair::line_col);
+        let frac = pairs
+            .next()
+            .as_ref()
+            .map(Pair::as_str)
+            .map(str::bytes)
+            .map(|chrs| chrs.filter(|ch| *ch != b'_'))
+            .map(|chrs| [b'0', b'.'].into_iter().chain(chrs))
+            .map(Iterator::collect::<Box<_>>)
+            .as_ref()
+            .map(Box::as_ref)
+            .map(f64::from_lexical)
+            .transpose()
+            .map_err(|e| AstBuildError {
+                kind: e.into(),
+                pos: frac_pos.map(LineColLocation::Pos),
+            })?
+            .unwrap_or(0.0);
+
+        assert_exhausted!(pairs, Self);
+        Ok(Some(Self { neg, whole, frac }))
+    }
+}
+
+impl AstNode for ChrLit {
+    fn parse(pairs: &mut Pairs<Rule>) -> AstBuildResult<Option<Self>> {
+        let mut pairs = match_next!(pairs, Rule::chr);
+        Ok(Some(Self { val: '_' }))
+    }
+}
+
+impl AstNode for StrLit {
+    fn parse(pairs: &mut Pairs<Rule>) -> AstBuildResult<Option<Self>> {
+        let mut pairs = match_next!(pairs, Rule::str);
+        Ok(Some(Self {
+            val: CString::new("").unwrap(),
+        }))
+    }
+}
